@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/define-query" },
+    { "path": "./packages/define-query-demo" }
+  ]
+}

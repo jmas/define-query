@@ -1,0 +1,50 @@
+{
+  "name": "define-query",
+  "version": "0.1.0",
+  "description": "Define TanStack Query options once — queries, mutations, optimistic updates, and row state.",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "keywords": [
+    "react",
+    "tanstack-query",
+    "react-query",
+    "query",
+    "mutation",
+    "optimistic-updates",
+    "typescript"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "README.uk.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.0.0",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@tanstack/react-query": "^5.101.0",
+    "@types/react": "^19.2.14",
+    "react": "^19.2.6",
+    "tsup": "^8.5.0",
+    "typescript": "~6.0.2",
+    "vitest": "^3.2.4"
+  }
+}

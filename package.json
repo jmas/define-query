@@ -1,0 +1,36 @@
+{
+  "name": "define-query-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run dev -w define-query-demo",
+    "build": "npm run build -w define-query",
+    "build:demo": "npm run build -w define-query && npm run build -w define-query-demo",
+    "publish:lib": "npm publish -w define-query --access public",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "preview": "npm run preview -w define-query-demo"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "tsup": "^8.5.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vitest": "^3.2.4"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}
