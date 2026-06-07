@@ -139,6 +139,8 @@ useInfiniteQuery({ ...timelineQuery(params), enabled, placeholderData: keepPrevi
 
 `defineMutation(query, config)` повертає `(params) => mutationOptions`. Обери **одну** optimistic-форму. Активний `QueryClient` береться з mutation-контексту TanStack, тож передавати його вручну не треба.
 
+Кожна мутація автоматично отримує стабільний **`mutationKey`**: `[...queryKey, name]`. Задавай унікальний `name` для кожної мутації на одному query (також потрібен для per-row retry). Для глобального спостереження використовуй `getMutationKey(mutation, params)` з `useIsMutating` / `useMutationState`.
+
 ### Object-форма — merge в один кешований об'єкт
 
 ```tsx
@@ -218,6 +220,13 @@ await add.mutateAsync('Привіт');  // реджектиться на rollbac
 add.isPending;                    // рідне
 add.error;                        // рідне — сире кинуте значення (класифікуй хелперами нижче)
 add.reset();                      // рідне
+```
+
+```tsx
+import { useIsMutating } from '@tanstack/react-query';
+import { getMutationKey } from 'define-query';
+
+const isAdding = useIsMutating({ mutationKey: getMutationKey(addComment, postId) });
 ```
 
 Додавай рідні колбеки вільно — напр. закрити панель після `removes`-мутації:
@@ -380,6 +389,7 @@ const rowState = useRowState(postCommentsQuery, postId);
 | Експорт                             | Призначення                                                            |
 | ----------------------------------- | ---------------------------------------------------------------------- |
 | `getQueryKey(query, params)`        | Стабільний ключ (те саме, що `query(params).queryKey`)                 |
+| `getMutationKey(mutation, params)`  | Стабільний mutation key (те саме, що `mutation(params).mutationKey`) |
 | `flattenInfiniteField(data, field)` | Сплющити поле-список по всіх infinite-сторінках (або по plain-об'єкту) |
 | `isTempId(id)`                      | Чи є id ще не збереженим optimistic-плейсхолдером                      |
 

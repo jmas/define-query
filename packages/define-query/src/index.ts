@@ -38,3 +38,4 @@ export type { MutationError, ValidationFields } from './errors';
 // Utilities
 export { flattenInfiniteField } from './cache-ops';
 export { isTempId } from './temp-id';
+export { getMutationKey } from './query-key';

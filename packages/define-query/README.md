@@ -137,6 +137,8 @@ useInfiniteQuery({ ...timelineQuery(params), enabled, placeholderData: keepPrevi
 
 `defineMutation(query, config)` returns `(params) => mutationOptions`. Pick **one** optimistic form. The active `QueryClient` is read from TanStack's mutation context, so you never thread it yourself.
 
+Each mutation gets a stable **`mutationKey`** automatically: `[...queryKey, name]`. Give each mutation on the same query a unique `name` (also used for per-row retry routing). Use `getMutationKey(mutation, params)` with `useIsMutating` / `useMutationState` for global observability.
+
 ### Object form — merge into a single cached object
 
 ```tsx
@@ -216,6 +218,13 @@ await add.mutateAsync('Hello');  // rejects on a rolled-back failure (validation
 add.isPending;                   // native
 add.error;                       // native — raw thrown error (classify with the helpers below)
 add.reset();                     // native
+```
+
+```tsx
+import { useIsMutating } from '@tanstack/react-query';
+import { getMutationKey } from 'define-query';
+
+const isAdding = useIsMutating({ mutationKey: getMutationKey(addComment, postId) });
 ```
 
 Add native callbacks freely — e.g. close a panel after a `removes` mutation:
@@ -373,6 +382,7 @@ Only `insert` / `update` mutations with `keepOnFail: true` produce `failed` rows
 | Export | Purpose |
 |--------|---------|
 | `getQueryKey(query, params)` | Stable key (same as `query(params).queryKey`) |
+| `getMutationKey(mutation, params)` | Stable mutation key (same as `mutation(params).mutationKey`) |
 | `flattenInfiniteField(data, field)` | Flatten a list field across infinite pages (or a plain object) |
 | `isTempId(id)` | Whether an id is an un-persisted optimistic placeholder |
 

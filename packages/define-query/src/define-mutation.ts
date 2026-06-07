@@ -1,5 +1,6 @@
 import type { InfiniteData, UseMutationOptions } from '@tanstack/react-query';
 import type { InfiniteQueryFactory, QueryFactory } from './define-query';
+import { buildMutationKey } from './query-key';
 import { runMutation } from './run-mutation';
 import type { OnBuilder, SyncEvent, SyncOp } from './sync';
 
@@ -175,6 +176,7 @@ export type MutationPlan<TParams, TInput, TResponse> = {
 /** Call with params to get TanStack `mutationOptions`: `useMutation(addComment(id))`. */
 export type MutationFactory<TParams, TInput, TResponse> = {
   (params: TParams): UseMutationOptions<TResponse, Error, TInput, unknown>;
+  /** Stable TanStack mutation key — `[...queryKey, name]`. */
   key: (params: TParams) => readonly unknown[];
   readonly __input?: TInput;
 };
@@ -260,19 +262,23 @@ function makeFactory<TParams, TInput, TResponse>(
     sync: config.sync as Sync<TParams, TInput, TResponse> | undefined,
   };
 
+  const mutationKeyFn = (params: TParams): readonly unknown[] =>
+    buildMutationKey(query, plan.name, params);
+
   const factory = (params: TParams): UseMutationOptions<
     TResponse,
     Error,
     TInput,
     unknown
   > => ({
+    mutationKey: mutationKeyFn(params),
     // TanStack passes the active QueryClient as `ctx.client`, so callers never
     // thread it themselves: `useMutation(addComment(id))`.
     mutationFn: (input: TInput, ctx) =>
       runMutation(ctx.client, plan, params, input) as Promise<TResponse>,
   });
 
-  return Object.assign(factory, { key: query.key }) as MutationFactory<TParams, TInput, TResponse>;
+  return Object.assign(factory, { key: mutationKeyFn }) as MutationFactory<TParams, TInput, TResponse>;
 }
 
 /* ------------------------------------------------------------------ *

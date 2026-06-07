@@ -68,10 +68,27 @@ function sanitizeKey(key: readonly unknown[]): readonly unknown[] {
   return out;
 }
 
-/** Build the stable TanStack query key for a query/mutation + params. */
+/** Build the stable TanStack query key for a query + params. */
 export function getQueryKey<TParams>(ref: KeyRef, params: TParams): readonly unknown[] {
   const keyFn = ref.key as (p: TParams) => readonly unknown[];
   return sanitizeKey(keyFn(normalizeParams(params)));
+}
+
+/** Build the stable TanStack mutation key: `[...queryKey, name]`. */
+export function buildMutationKey<TParams>(
+  query: KeyRef,
+  name: string,
+  params: TParams,
+): readonly unknown[] {
+  return [...getQueryKey(query, params), name];
+}
+
+/** Stable mutation key (same as `mutation(params).mutationKey`). */
+export function getMutationKey<TParams>(
+  mutation: { key: (params: TParams) => readonly unknown[] },
+  params: TParams,
+): readonly unknown[] {
+  return mutation.key(normalizeParams(params));
 }
 
 /** Stable string form of a key — used to index the row store. */
