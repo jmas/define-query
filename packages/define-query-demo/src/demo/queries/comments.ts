@@ -41,7 +41,7 @@ export const removeCommentMutation = defineMutation(postCommentsQuery, {
   name: 'remove',
   remapInput: ['commentId'],
   request: (postId: string, commentId: string) => demoApi.deleteComment(postId, commentId),
-  remove: 'items',
+  removeField: 'items',
   match: (item, commentId) => item.id === commentId,
   sync: on => [
     on(postQuery).bump('commentCount', -1, { params: ({ params }) => params }),

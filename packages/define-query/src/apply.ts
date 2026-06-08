@@ -79,7 +79,7 @@ export function applyDraft(
       return { next, rowId };
     }
 
-    case 'remove': {
+    case 'removeField': {
       const match = matcher(effect.match, input);
       const matched = findItem(data, effect.field, match);
       const rowId = readId(matched);
@@ -140,7 +140,7 @@ export function applySettle(
       );
     }
 
-    case 'remove':
+    case 'removeField':
       return data;
 
     case 'removeQuery':
@@ -177,7 +177,7 @@ export function rollback(effect: Effect, current: unknown, input: unknown, ctx: 
       return updateItem(current, effect.field, item => readId(item) === ctx.rowId, () => prevItem);
     }
 
-    case 'remove': {
+    case 'removeField': {
       const match = matcher(effect.match, input);
       const prevItem = findItem(ctx.previous, effect.field, match);
       if (prevItem === undefined) return current;

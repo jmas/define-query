@@ -93,7 +93,7 @@ describe('update effect', () => {
 
 describe('remove effect', () => {
   const effect: Effect = {
-    kind: 'remove',
+    kind: 'removeField',
     field: 'items',
     match: (item, input) => (item as Item).id === input,
   };

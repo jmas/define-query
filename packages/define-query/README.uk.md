@@ -25,7 +25,7 @@ defineMutation(query, config)  →  (params) => mutationOptions(...)
 |-----|------------------|
 | **Query** | `key`, `fetch`, опційні `options` (проксяться в TanStack) |
 | **Mutation** | `request`, опційний `validate`, одна draft-форма, опційний `sync` |
-| **Draft-форма** | `object`, `insert` / `prepend`, `update`, `remove` або `removes` |
+| **Draft-форма** | `object`, `insert` / `prepend`, `update`, `removeField` або `removeQuery` |
 | **Sync** | Mutation sync після успішного `request`; query fetch sync після network fetch |
 | **UI state** | Рідний `useMutation` і `useQuery` (draft у кеші) |
 
@@ -37,17 +37,15 @@ defineMutation(query, config)  →  (params) => mutationOptions(...)
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { setupDefineQuery } from 'define-query';
 
 const queryClient = new QueryClient();
-setupDefineQuery(queryClient); // потрібно для query fetch sync
 
 <QueryClientProvider client={queryClient}>
   <App />
 </QueryClientProvider>
 ```
 
-`setupDefineQuery` підписує `QueryCache` для `sync` на `defineQuery` / `defineInfiniteQuery`. Мутації працюють і без нього; fetch sync — ні.
+`define-query` підключається до `QueryClient` автоматично: при першому network fetch query з `sync` і при першій мутації. Ручний bootstrap не потрібен.
 
 **Зарезервований meta:** не задавай `options.meta['define-query']` на query-фабриках — цей ключ належить бібліотеці.
 
@@ -122,7 +120,7 @@ const items = flattenInfiniteField(timeline.data, 'items');
 
 ### Query fetch sync
 
-`sync` на `defineQuery` / `defineInfiniteQuery` — після **успішного network fetch** (не після ручного `setQueryData`). Потрібен `setupDefineQuery`.
+`sync` на `defineQuery` / `defineInfiniteQuery` — після **успішного network fetch** (не після ручного `setQueryData`). Підключається автоматично при першому fetch.
 
 | Операція | Ефект |
 |----------|-------|
@@ -153,7 +151,7 @@ type DraftCtx<TData, TInput> = {
 | object | `(ctx) => TData` | `(ctx & { response }) => TData` |
 | insert / prepend | `(ctx) => TItem` | `(response) => TItem` |
 | update | `(ctx) => Partial<TItem>` | `(ctx & { response }) => Partial<TItem>` |
-| remove / removes | — | — |
+| removeField / removeQuery | — | — |
 
 ### Приклади
 
@@ -209,7 +207,6 @@ add.error?.banner();       // toast/banner (не validation)
 
 | Експорт | Призначення |
 |---------|-------------|
-| `setupDefineQuery(client)` | Підключити query fetch sync |
 | `factory.key(params)` | Стабільний ключ query / mutation |
 | `flattenInfiniteField(data, field)` | Сплющити список по infinite-сторінках |
 | `isTempId` / `createTempId` | Temp id |

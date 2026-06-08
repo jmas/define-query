@@ -14,10 +14,6 @@ export function warnMutateWithoutCache(mutationName: string): void {
   warn(`mutate without cached data — draft skipped (${mutationName})`);
 }
 
-export function warnSetupRequired(): void {
-  warn('setupDefineQuery(client) was not called — query fetch sync will not run');
-}
-
 export function warnCollapsedParams(params: unknown): void {
   warn(
     'normalizeParams: nested/non-serializable params collapsed to {}. Use a flat key object.',

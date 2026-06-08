@@ -90,17 +90,17 @@ type Common<TParams, TData, TInput, TResponse> = {
   readonly __data?: TData;
 };
 
-type RemovesMutation<TParams, TData, TInput, TResponse> = Common<
+type RemoveQueryMutation<TParams, TData, TInput, TResponse> = Common<
   TParams,
   TData,
   TInput,
   TResponse
 > & {
-  removes: true;
+  removeQuery: true;
   insert?: never;
   prepend?: never;
   update?: never;
-  remove?: never;
+  removeField?: never;
   draft?: never;
   settle?: never;
   match?: never;
@@ -109,9 +109,9 @@ type RemovesMutation<TParams, TData, TInput, TResponse> = Common<
 type InsertMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TData> extends never
   ? never
   : Common<TParams, TData, TInput, TResponse> & {
-      removes?: never;
+      removeQuery?: never;
       update?: never;
-      remove?: never;
+      removeField?: never;
       draft: (ctx: DraftCtx<TData, TInput>) => ListItem<TData>;
       settle?: (response: TResponse) => ListItem<TData>;
     } & (
@@ -122,26 +122,26 @@ type InsertMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TDa
 type UpdateMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TData> extends never
   ? never
   : Common<TParams, TData, TInput, TResponse> & {
-      removes?: never;
+      removeQuery?: never;
       insert?: never;
       prepend?: never;
-      remove?: never;
+      removeField?: never;
       update: MutationListFieldOf<TData>;
       match?: (item: ListItem<TData>, input: TInput) => boolean;
       draft: (ctx: DraftCtx<TData, TInput>) => Partial<ListItem<TData>>;
       settle?: (ctx: SettleCtx<TData, TInput, TResponse>) => Partial<ListItem<TData>>;
     };
 
-type RemoveMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TData> extends never
+type RemoveFieldMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TData> extends never
   ? never
   : Common<TParams, TData, TInput, TResponse> & {
-      removes?: never;
+      removeQuery?: never;
       insert?: never;
       prepend?: never;
       update?: never;
       draft?: never;
       settle?: never;
-      remove: MutationListFieldOf<TData>;
+      removeField: MutationListFieldOf<TData>;
       match?: (item: ListItem<TData>, input: TInput) => boolean;
     };
 
@@ -151,21 +151,21 @@ type ObjectMutation<TParams, TData, TInput, TResponse> = Common<
   TInput,
   TResponse
 > & {
-  removes?: never;
+  removeQuery?: never;
   insert?: never;
   prepend?: never;
   update?: never;
-  remove?: never;
+  removeField?: never;
   match?: never;
   draft?: (ctx: DraftCtx<TData, TInput>) => TData;
   settle?: (ctx: SettleCtx<TData, TInput, TResponse>) => TData;
 };
 
 export type MutationConfig<TParams, TData, TInput, TResponse> =
-  | RemovesMutation<TParams, TData, TInput, TResponse>
+  | RemoveQueryMutation<TParams, TData, TInput, TResponse>
   | InsertMutation<TParams, TData, TInput, TResponse>
   | UpdateMutation<TParams, TData, TInput, TResponse>
-  | RemoveMutation<TParams, TData, TInput, TResponse>
+  | RemoveFieldMutation<TParams, TData, TInput, TResponse>
   | ObjectMutation<TParams, TData, TInput, TResponse>;
 
 /* ------------------------------------------------------------------ *
@@ -192,16 +192,16 @@ export type Effect =
       draft: (ctx: DraftCtx<unknown, unknown>) => unknown;
       settle?: (ctx: SettleCtx<unknown, unknown, unknown>) => unknown;
     }
-  | { kind: 'remove'; field: string; match?: (item: unknown, input: unknown) => boolean }
+  | { kind: 'removeField'; field: string; match?: (item: unknown, input: unknown) => boolean }
   | { kind: 'removeQuery' };
 
 /** Structural config read by runtime normalization — not part of the public API. */
 type RuntimeMutationConfig = {
-  removes?: true;
+  removeQuery?: true;
   insert?: string;
   prepend?: string;
   update?: string;
-  remove?: string;
+  removeField?: string;
   draft?: unknown;
   settle?: unknown;
   match?: unknown;
@@ -258,11 +258,11 @@ function toRuntimeConfig<
   config: MutationConfigWithRequest<TParams, TData, TInput, TResponse, TRest>,
 ): RuntimeMutationConfig {
   return {
-    removes: 'removes' in config && config.removes ? true : undefined,
+    removeQuery: 'removeQuery' in config && config.removeQuery ? true : undefined,
     insert: 'insert' in config ? config.insert : undefined,
     prepend: 'prepend' in config ? config.prepend : undefined,
     update: 'update' in config ? config.update : undefined,
-    remove: 'remove' in config ? config.remove : undefined,
+    removeField: 'removeField' in config ? config.removeField : undefined,
     draft: 'draft' in config ? config.draft : undefined,
     settle: 'settle' in config ? config.settle : undefined,
     match: 'match' in config ? config.match : undefined,
@@ -270,7 +270,7 @@ function toRuntimeConfig<
 }
 
 function normalizeEffect(config: RuntimeMutationConfig): Effect {
-  if (config.removes) return { kind: 'removeQuery' };
+  if (config.removeQuery) return { kind: 'removeQuery' };
 
   if (config.insert !== undefined || config.prepend !== undefined) {
     const field = config.insert ?? config.prepend ?? '';
@@ -293,10 +293,10 @@ function normalizeEffect(config: RuntimeMutationConfig): Effect {
     };
   }
 
-  if (config.remove !== undefined) {
+  if (config.removeField !== undefined) {
     return {
-      kind: 'remove',
-      field: config.remove,
+      kind: 'removeField',
+      field: config.removeField,
       match: config.match as ((item: unknown, input: unknown) => boolean) | undefined,
     };
   }
@@ -310,17 +310,17 @@ function normalizeEffect(config: RuntimeMutationConfig): Effect {
 
 function assertSingleDraftForm(config: RuntimeMutationConfig): void {
   const hasListForm =
-    config.removes
+    config.removeQuery
     || config.insert !== undefined
     || config.prepend !== undefined
     || config.update !== undefined
-    || config.remove !== undefined;
+    || config.removeField !== undefined;
 
   const forms = [
-    config.removes ? 'removes' : undefined,
+    config.removeQuery ? 'removeQuery' : undefined,
     config.insert !== undefined || config.prepend !== undefined ? 'insert' : undefined,
     config.update !== undefined ? 'update' : undefined,
-    config.remove !== undefined ? 'remove' : undefined,
+    config.removeField !== undefined ? 'removeField' : undefined,
     !hasListForm && (config.draft !== undefined || config.settle !== undefined) ? 'object' : undefined,
   ].filter((form): form is string => form !== undefined);
 

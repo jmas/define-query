@@ -1,6 +1,6 @@
 import { InfiniteQueryObserver, QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
-import { setupDefineQuery } from './client-state';
+import { isDefineQuerySetup } from './client-state';
 import { defineInfiniteQuery, defineQuery } from './define-query';
 import {
   createQueryOnBuilder,
@@ -141,9 +141,19 @@ describe('runQuerySync', () => {
 });
 
 describe('defineQuery sync via QueryCache', () => {
+  it('lazy-inits on first fetch without manual setup', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    expect(isDefineQuerySetup(client)).toBe(false);
+
+    await client.fetchQuery(postCommentsQuery('p1'));
+    await tick();
+
+    expect(isDefineQuerySetup(client)).toBe(true);
+    expect(client.getQueryData(['post', 'p1', 'comment', 'c1'])).toEqual({ id: 'c1', text: 'one' });
+  });
+
   it('runs setEach after a successful fetch', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    setupDefineQuery(client);
     await client.fetchQuery(postCommentsQuery('p1'));
     await tick();
 
@@ -153,7 +163,6 @@ describe('defineQuery sync via QueryCache', () => {
 
   it('runs set after a successful fetch', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    setupDefineQuery(client);
     await client.fetchQuery(postDetailQuery('p1'));
     await tick();
 
@@ -178,7 +187,6 @@ describe('defineQuery sync via QueryCache', () => {
 
   it('does not run sync for queries without sync config', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    setupDefineQuery(client);
     await client.fetchQuery(plainListQuery('plain'));
     await tick();
 
@@ -187,7 +195,6 @@ describe('defineQuery sync via QueryCache', () => {
 
   it('runs sync again on refetch', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    setupDefineQuery(client);
     await client.fetchQuery(postCommentsQuery('p1'));
     await tick();
 
@@ -201,8 +208,6 @@ describe('defineQuery sync via QueryCache', () => {
   it('isolates sync between QueryClients', async () => {
     const clientA = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const clientB = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    setupDefineQuery(clientA);
-    setupDefineQuery(clientB);
 
     await clientA.fetchQuery(postCommentsQuery('p1'));
     await tick();
@@ -215,7 +220,6 @@ describe('defineQuery sync via QueryCache', () => {
 describe('defineInfiniteQuery sync via QueryCache', () => {
   it('setEach flattens infinite pages after fetchNextPage', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    setupDefineQuery(client);
     const observer = new InfiniteQueryObserver(client, timelineInfiniteQuery({ q: '' }));
 
     await observer.fetchNextPage();

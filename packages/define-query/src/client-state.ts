@@ -6,14 +6,14 @@ const settledIdsByClient = new WeakMap<QueryClient, Map<string, string>>();
 const subscribedClients = new WeakSet<QueryClient>();
 
 /**
- * Wire define-query into a QueryClient — call once after `new QueryClient()`.
- * Required for query fetch sync (`sync` on `defineQuery` / `defineInfiniteQuery`).
+ * Wire define-query into a QueryClient — idempotent, called automatically on
+ * first sync fetch or mutation.
  */
-export function setupDefineQuery(client: QueryClient): void {
+export function ensureDefineQuery(client: QueryClient): void {
   ensureCacheCleanup(client);
 }
 
-/** Whether `setupDefineQuery` has been called for this client. */
+/** Whether the QueryCache subscriber is active for this client. */
 export function isDefineQuerySetup(client: QueryClient): boolean {
   return subscribedClients.has(client);
 }

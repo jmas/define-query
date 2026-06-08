@@ -30,7 +30,7 @@ const CommentsHeader = memo(function CommentsHeader() {
     <header className={panelHeaderCls}>
       <h3 className={panelSubtitleCls}>Comments</h3>
       <FeatureTag label="update: 'items'" />
-      <FeatureTag label="remove: 'items'" />
+      <FeatureTag label="removeField: 'items'" />
       <FeatureTag label="query fetch sync → commentQuery" />
     </header>
   );

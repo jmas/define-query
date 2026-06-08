@@ -18,6 +18,6 @@ export const renamePostMutation = defineMutation(postQuery, {
 export const removePostMutation = defineMutation(postQuery, {
   name: 'remove',
   request: (id: string) => demoApi.deletePost(id),
-  removes: true,
+  removeQuery: true,
   sync: on => [on(timelineInfiniteQuery).removeItem('items')],
 });

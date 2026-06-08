@@ -25,9 +25,6 @@ export type {
   InferMutationResponse,
 } from './define-mutation';
 
-// Client setup
-export { setupDefineQuery } from './client-state';
-
 // Sync builder types
 export type { SyncEvent, SyncOp, OnBuilder, QuerySync } from './sync';
 

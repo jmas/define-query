@@ -25,7 +25,7 @@ You keep TanStack's full surface (`isPending`, `error`, `fetchStatus`, `mutate`,
 |-------|----------------|
 | **Query** | `key`, `fetch`, optional `options` (forwarded to TanStack) |
 | **Mutation** | `request`, optional `validate`, one draft form, optional `sync` |
-| **Draft form** | `object` (merge), `insert` / `prepend`, `update`, `remove`, or `removes` (drop the query) |
+| **Draft form** | `object` (merge), `insert` / `prepend`, `update`, `removeField`, or `removeQuery` (drop the query) |
 | **Sync** | Mutation sync after successful `request`; query fetch sync after successful network fetch |
 | **UI state** | Native `useMutation` (`isPending`, `error`) and `useQuery` (draft data in cache) |
 
@@ -39,17 +39,15 @@ The first argument to `defineMutation` is the **query whose cache the mutation u
 
 ```tsx
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { setupDefineQuery } from 'define-query';
 
 const queryClient = new QueryClient();
-setupDefineQuery(queryClient); // required for query fetch sync
 
 <QueryClientProvider client={queryClient}>
   <App />
 </QueryClientProvider>
 ```
 
-`setupDefineQuery` wires the `QueryCache` subscriber used by `sync` on `defineQuery` / `defineInfiniteQuery`. Mutations work without it; fetch sync does not.
+`define-query` wires into your `QueryClient` automatically: on the first network fetch of a query with `sync`, and on the first mutation. No manual bootstrap step.
 
 **Reserved meta:** do not set `options.meta['define-query']` on query factories — that key is owned by the library.
 
@@ -152,7 +150,7 @@ useInfiniteQuery({ ...timelineQuery(params), enabled, placeholderData: keepPrevi
 
 ### Query fetch sync — seed sibling caches after fetch
 
-`sync: (on) => [...]` on `defineQuery` / `defineInfiniteQuery` runs **after a successful network fetch** (not after manual `setQueryData`). Requires `setupDefineQuery`.
+`sync: (on) => [...]` on `defineQuery` / `defineInfiniteQuery` runs **after a successful network fetch** (not after manual `setQueryData`). Wired automatically on first fetch.
 
 | Op | Effect |
 |----|--------|
@@ -187,7 +185,7 @@ type DraftCtx<TData, TInput> = {
 | object | `(ctx) => TData` | `(ctx & { response }) => TData` — optional; default shallow merge |
 | insert / prepend | `(ctx) => TItem` | `(response) => TItem` |
 | update | `(ctx) => Partial<TItem>` | `(ctx & { response }) => Partial<TItem>` — optional; default shallow merge response |
-| remove / removes | — | — |
+| removeField / removeQuery | — | — |
 
 ### Object form — merge into a single cached object
 
@@ -232,13 +230,13 @@ const editComment = defineMutation(postCommentsQuery, {
 });
 ```
 
-### Remove — drop a matching list item
+### `removeField` — drop a matching list item
 
 ```tsx
 const removeComment = defineMutation(postCommentsQuery, {
   name: 'remove',
   request: (postId: string, commentId: string) => api.deleteComment(postId, commentId),
-  remove: 'items',
+  removeField: 'items',
   match: (item, commentId) => item.id === commentId,
   sync: (on) => [on(postQuery).bump('commentCount', -1)],
 });
@@ -246,13 +244,13 @@ const removeComment = defineMutation(postCommentsQuery, {
 
 Removing an un-persisted temp row skips the network request automatically.
 
-### `removes` — drop the whole query
+### `removeQuery` — drop the whole query
 
 ```tsx
 const removePost = defineMutation(postQuery, {
   name: 'removePost',
   request: (id: string) => api.deletePost(id),
-  removes: true,
+  removeQuery: true,
   sync: (on) => [on(timelineQuery).removeItem('items')],
 });
 ```
@@ -330,7 +328,6 @@ Use `isMutationError(error)` only when handling `unknown` (e.g. a shared error h
 
 | Export | Purpose |
 |--------|---------|
-| `setupDefineQuery(client)` | Wire query fetch sync (call once per `QueryClient`) |
 | `factory.key(params)` | Stable normalized query / mutation key |
 | `flattenInfiniteField(data, field)` | Flatten a list field across infinite pages (typed from `data`) |
 | `isTempId(id)` / `createTempId()` | Temp draft id helpers |
@@ -347,7 +344,7 @@ define-mutation.ts  defineMutation, DraftCtx, type inference
 run-mutation.ts     draft → request → settle / rollback + sync
 query-sync.ts       query fetch sync ops + runQuerySync
 query-fetch-sync.ts QueryCache subscriber + reserved meta
-client-state.ts     setupDefineQuery, per-QueryClient settledIds
+client-state.ts     ensureDefineQuery (lazy), per-QueryClient settledIds
 errors.ts           fail, DefineQueryMutationError, isMutationError
 query-key.ts        key normalization (internal)
 cache-ops.ts        list/object ops (plain + InfiniteData)

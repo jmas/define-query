@@ -7,8 +7,7 @@ import {
   type UseInfiniteQueryOptions,
   type UseQueryOptions,
 } from '@tanstack/react-query';
-import { isDefineQuerySetup } from './client-state';
-import { warnSetupRequired } from './dev-warnings';
+import { ensureDefineQuery } from './client-state';
 import { buildDefineQueryMeta } from './query-fetch-sync';
 import { getQueryKey } from './query-key';
 import {
@@ -117,7 +116,7 @@ export function defineQuery<TParams, TData>(
     return queryOptions({
       queryKey: keyFn(params),
       queryFn: ctx => {
-        if (hasSync && !isDefineQuerySetup(ctx.client)) warnSetupRequired();
+        if (hasSync) ensureDefineQuery(ctx.client);
         return config.fetch(params);
       },
       ...restOptions,
@@ -152,7 +151,7 @@ export function defineInfiniteQuery<TParams, TPage, TPageParam>(
     return infiniteQueryOptions<TPage, Error, InfiniteData<TPage>, readonly unknown[], TPageParam>({
       queryKey: keyFn(params),
       queryFn: ctx => {
-        if (hasSync && !isDefineQuerySetup(ctx.client)) warnSetupRequired();
+        if (hasSync) ensureDefineQuery(ctx.client);
         return config.fetch(params, ctx.pageParam as TPageParam);
       },
       initialPageParam: config.initialPage,

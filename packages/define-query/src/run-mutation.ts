@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { applyDraft, applySettle, rollback } from './apply';
 import { findItem } from './cache-ops';
 import {
+  ensureDefineQuery,
   forgetSettledId,
   forgetSettledIdsFromData,
   getSettledIds,
@@ -79,6 +80,8 @@ export async function runMutation<TParams, TData, TInput, TResponse>(
   params: TParams,
   input: TInput | undefined,
 ): Promise<TResponse | undefined> {
+  ensureDefineQuery(client);
+
   const effect = plan.effect;
   const queryKey = getQueryKey(plan.query, params);
   const ctx = { client, queryKey, mutation: plan.name };
@@ -201,7 +204,7 @@ export async function runMutation<TParams, TData, TInput, TResponse>(
             : findItem(next, effect.field, row => readId(row) !== tempId);
       }
 
-      if (effect.kind === 'remove' && rowId) {
+      if (effect.kind === 'removeField' && rowId) {
         forgetSettledId(client, rowId);
       }
     }

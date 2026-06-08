@@ -79,7 +79,7 @@ describe('overlapping mutations on one list query', () => {
     const removeComment = defineMutation(commentsQuery, {
       name: 'remove',
       request: (postId: string, commentId: string) => removeServer.fn(postId, commentId),
-      remove: 'items',
+      removeField: 'items',
       match: (item, commentId) => item.id === commentId,
     });
 

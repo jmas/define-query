@@ -69,7 +69,7 @@ const removePost = defineMutation(postQuery, {
   name: 'remove',
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   request: async (_id: string) => undefined,
-  removes: true,
+  removeQuery: true,
 });
 
 type RemoveInput = NonNullable<ReturnType<typeof removePost>['mutationFn']> extends (

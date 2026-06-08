@@ -27,7 +27,7 @@ describe('defineMutation guards', () => {
   it('requires a mutation name', () => {
     expect(() =>
       defineMutation(postQuery, {
-        name: 'test',
+        name: '',
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         request: async (_id: string) => ({ id: 'p1', title: 'T' }),
         draft: ({ data }) => data,

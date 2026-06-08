@@ -28,7 +28,7 @@ const PostHeaderTags = memo(function PostHeaderTags() {
     <>
       <FeatureTag label="draft merge" />
       <FeatureTag label="staleTime refetch" />
-      <FeatureTag label="removes: true" />
+      <FeatureTag label="removeQuery: true" />
     </>
   );
 });

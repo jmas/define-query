@@ -141,7 +141,7 @@ describe('remove mutations', () => {
   const removeComment = defineMutation(commentsQuery, {
     name: 'remove',
     request: async (postId: string, commentId: string) => ({ ok: true, postId, commentId }),
-    remove: 'items',
+    removeField: 'items',
     match: (item, commentId) => item.id === commentId,
   });
 
@@ -154,7 +154,7 @@ describe('remove mutations', () => {
     expect(client.getQueryData<{ items: Comment[] }>(key)?.items.map(i => i.id)).toEqual(['c2']);
   });
 
-  it('removes the whole query for a `removes` mutation', async () => {
+  it('removes the whole query for a `removeQuery` mutation', async () => {
     const client = new QueryClient();
     const key = getQueryKey(postQuery, 'p1');
     client.setQueryData(key, { id: 'p1', title: 'T', commentCount: 0 });
@@ -162,7 +162,7 @@ describe('remove mutations', () => {
     const removePost = defineMutation(postQuery, {
       name: 'removePost',
       request: async (id: string) => ({ ok: true, id }),
-      removes: true,
+      removeQuery: true,
     });
 
     await call(client, removePost('p1'));

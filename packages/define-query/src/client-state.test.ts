@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
-import { getSettledIds, setupDefineQuery } from './client-state';
+import { getSettledIds } from './client-state';
 import { defineMutation } from './define-mutation';
 import { defineQuery } from './define-query';
 import { getQueryKey } from './query-key';
@@ -64,7 +64,7 @@ describe('lifecycle cleanup', () => {
       name: 'remove',
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       request: async (_postId: string, _commentId: string) => ({ ok: true }),
-      remove: 'items',
+      removeField: 'items',
       match: (item, commentId) => item.id === commentId,
     });
 
@@ -96,7 +96,7 @@ describe('lifecycle cleanup', () => {
     const removePost = defineMutation(postQuery, {
       name: 'removePost',
       request: async () => ({ ok: true }),
-      removes: true,
+      removeQuery: true,
     });
 
     getSettledIds(client).set('tmp_p1', 'p1');
@@ -110,10 +110,17 @@ describe('lifecycle cleanup', () => {
 
   it('QueryCache removed event clears settledIds for externally removed queries', async () => {
     const client = new QueryClient();
-    setupDefineQuery(client);
     const key = getQueryKey(commentsQuery, 'p1');
-    client.setQueryData(key, { items: [{ id: 'c1', text: 'a' }] });
+    client.setQueryData(key, { items: [] });
 
+    const noopMutation = defineMutation(commentsQuery, {
+      name: 'noop',
+      request: async () => ({ ok: true }),
+      draft: ({ data }) => data,
+    });
+    await call(client, noopMutation('p1'));
+
+    client.setQueryData(key, { items: [{ id: 'c1', text: 'a' }] });
     getSettledIds(client).set('tmp_c1', 'c1');
     expect(getSettledIds(client).size).toBe(1);
 
