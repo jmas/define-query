@@ -1,6 +1,6 @@
 {
   "name": "define-query",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Define TanStack Query options once — queries, mutations, optimistic updates, and row state.",
   "type": "module",
   "sideEffects": false,
