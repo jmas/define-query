@@ -1,32 +1,77 @@
-import type { InfiniteData, UseMutationOptions } from '@tanstack/react-query';
-import type { InfiniteQueryFactory, QueryFactory } from './define-query';
+import type { UseMutationOptions } from '@tanstack/react-query';
+import type { MutationQueryRef } from './define-query';
+import { warnDuplicateMutationName } from './dev-warnings';
+import { DefineQueryMutationError, toDefineQueryMutationError } from './errors';
 import { buildMutationKey } from './query-key';
 import { runMutation } from './run-mutation';
 import type { OnBuilder, SyncEvent, SyncOp } from './sync';
+import type { ListItem, SyncListFieldOf } from './sync-list-types';
 
 /* ------------------------------------------------------------------ *
  * Type inference helpers
  * ------------------------------------------------------------------ */
 
-type ArrayElem<T> = T extends (infer E)[] ? E : never;
-type ItemUnion<O> = O extends Record<string, unknown> ? ArrayElem<O[keyof O]> : unknown;
+type QueryParams<Q extends MutationQueryRef> =
+  Q extends { key: (params: infer P) => readonly unknown[] } ? P : never;
 
-type ListFieldOf<T> = {
-  [K in keyof T]: T[K] extends readonly unknown[] ? K : never;
-}[keyof T];
+type QueryData<Q extends MutationQueryRef> =
+  Q extends { readonly __data?: infer D } ? D : never;
 
-/** Element type of the query's list field(s). Works for plain + infinite data. */
-export type ListItem<TData> = TData extends InfiniteData<infer Page>
-  ? ItemUnion<Page>
-  : ItemUnion<TData>;
+type MutationListFieldOf<TData> = SyncListFieldOf<TData>;
+
+/** Supported `request` rest arity after `params`: none or exactly one `input`. */
+type MutationRequestRest = [] | [unknown];
+
+/** `TInput` from `request` rest tuple — `[]` → `void`, `[I]` → `I`. */
+export type InferMutationInputFromRest<TRest extends MutationRequestRest> =
+  TRest extends [] ? void : TRest extends [infer I] ? I : never;
+
+/** @deprecated Use `InferMutationInputFromRest` — kept for advanced typing utilities. */
+export type InferMutationInput<TRequest, TParams> = InferMutationInputFromRest<
+  TRequest extends (params: TParams, ...rest: infer Rest) => Promise<unknown>
+    ? Rest extends MutationRequestRest
+      ? Rest
+      : never
+    : never
+>;
+
+export type InferMutationResponse<TRequest> =
+  TRequest extends (...args: never[]) => infer R ? Awaited<R> : never;
+
+export type { ListItem } from './sync-list-types';
+
+/* ------------------------------------------------------------------ *
+ * Draft context — unified across all mutation forms
+ * ------------------------------------------------------------------ */
+
+type DefaultListItem<TData> = [ListItem<TData>] extends [never] ? unknown : ListItem<TData>;
+
+export type DraftCtx<TData, TInput, TItem = DefaultListItem<TData>> = {
+  /** Current cached data for the mutation's query. */
+  data: TData;
+  input: TInput;
+  /** Insert/prepend — generated before `draft` runs. */
+  tempId?: string;
+  /** Update — the matched list row, when found. */
+  item?: TItem;
+};
+
+export type SettleCtx<
+  TData,
+  TInput,
+  TResponse,
+  TItem = DefaultListItem<TData>,
+> = DraftCtx<TData, TInput, TItem> & {
+  response: TResponse;
+};
 
 /* ------------------------------------------------------------------ *
  * Public config
  * ------------------------------------------------------------------ */
 
-type Sync<TParams, TInput, TResponse> = (
-  on: OnBuilder<SyncEvent<TParams, TInput, TResponse>>,
-) => readonly SyncOp<SyncEvent<TParams, TInput, TResponse>>[];
+type Sync<TParams, TData, TInput, TResponse> = (
+  on: OnBuilder<SyncEvent<TParams, TInput, TResponse, TData>>,
+) => readonly SyncOp<SyncEvent<TParams, TInput, TResponse, TData>>[];
 
 /** Remap temp ids to server ids in mutation input before `request`. Default: `['id']`. */
 export type RemapInput<TInput> =
@@ -34,13 +79,13 @@ export type RemapInput<TInput> =
   | ((input: TInput, remap: (id: string) => string) => TInput);
 
 type Common<TParams, TData, TInput, TResponse> = {
-  /** Routes per-row retry. Defaults to `'mutation'`. */
-  name?: string;
-  /** Client-side checks — throw `fail.validation(...)`. Runs before the optimistic update. */
+  /** Stable mutation name for `mutationKey` — must be unique per query. */
+  name: string;
+  /** Client-side checks — throw `fail.validation(...)`. Runs before the draft update. */
   validate?: (input: TInput) => void;
   /** Which input fields to remap from temp to server id. Default: `['id']`. */
   remapInput?: RemapInput<TInput>;
-  sync?: Sync<TParams, TInput, TResponse>;
+  sync?: Sync<TParams, TData, TInput, TResponse>;
   /** @internal forces TData into inference */
   readonly __data?: TData;
 };
@@ -56,56 +101,47 @@ type RemovesMutation<TParams, TData, TInput, TResponse> = Common<
   prepend?: never;
   update?: never;
   remove?: never;
-  optimistic?: never;
-  settle?: never;
   draft?: never;
-  from?: never;
+  settle?: never;
   match?: never;
-  keepOnFail?: never;
 };
 
-type InsertMutation<TParams, TData, TInput, TResponse> = ListFieldOf<TData> extends never
+type InsertMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TData> extends never
   ? never
   : Common<TParams, TData, TInput, TResponse> & {
       removes?: never;
       update?: never;
       remove?: never;
-      optimistic?: never;
-      settle?: never;
-      draft: (input: TInput, tempId: string) => ListItem<TData>;
-      from?: (response: TResponse) => ListItem<TData>;
-      keepOnFail?: boolean;
-    } & ({ insert: string; prepend?: never } | { prepend: string; insert?: never });
+      draft: (ctx: DraftCtx<TData, TInput>) => ListItem<TData>;
+      settle?: (response: TResponse) => ListItem<TData>;
+    } & (
+      | { insert: MutationListFieldOf<TData>; prepend?: never }
+      | { prepend: MutationListFieldOf<TData>; insert?: never }
+    );
 
-type UpdateMutation<TParams, TData, TInput, TResponse> = ListFieldOf<TData> extends never
+type UpdateMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TData> extends never
   ? never
   : Common<TParams, TData, TInput, TResponse> & {
       removes?: never;
       insert?: never;
       prepend?: never;
       remove?: never;
-      optimistic?: never;
-      settle?: never;
-      from?: never;
-      update: string;
+      update: MutationListFieldOf<TData>;
       match?: (item: ListItem<TData>, input: TInput) => boolean;
-      draft: (input: TInput) => Partial<ListItem<TData>>;
-      keepOnFail?: boolean;
+      draft: (ctx: DraftCtx<TData, TInput>) => Partial<ListItem<TData>>;
+      settle?: (ctx: SettleCtx<TData, TInput, TResponse>) => Partial<ListItem<TData>>;
     };
 
-type RemoveMutation<TParams, TData, TInput, TResponse> = ListFieldOf<TData> extends never
+type RemoveMutation<TParams, TData, TInput, TResponse> = MutationListFieldOf<TData> extends never
   ? never
   : Common<TParams, TData, TInput, TResponse> & {
       removes?: never;
       insert?: never;
       prepend?: never;
       update?: never;
-      optimistic?: never;
-      settle?: never;
       draft?: never;
-      from?: never;
-      keepOnFail?: never;
-      remove: string;
+      settle?: never;
+      remove: MutationListFieldOf<TData>;
       match?: (item: ListItem<TData>, input: TInput) => boolean;
     };
 
@@ -120,12 +156,9 @@ type ObjectMutation<TParams, TData, TInput, TResponse> = Common<
   prepend?: never;
   update?: never;
   remove?: never;
-  draft?: never;
-  from?: never;
   match?: never;
-  keepOnFail?: never;
-  optimistic?: (data: TData, input: TInput) => TData;
-  settle?: (data: TData, response: TResponse) => TData;
+  draft?: (ctx: DraftCtx<TData, TInput>) => TData;
+  settle?: (ctx: SettleCtx<TData, TInput, TResponse>) => TData;
 };
 
 export type MutationConfig<TParams, TData, TInput, TResponse> =
@@ -142,75 +175,111 @@ export type MutationConfig<TParams, TData, TInput, TResponse> =
 export type Effect =
   | {
       kind: 'object';
-      optimistic?: (data: unknown, input: unknown) => unknown;
-      settle?: (data: unknown, response: unknown) => unknown;
+      draft?: (ctx: DraftCtx<unknown, unknown>) => unknown;
+      settle?: (ctx: SettleCtx<unknown, unknown, unknown>) => unknown;
     }
   | {
       kind: 'insert';
       field: string;
       position: 'start' | 'end';
-      draft: (input: unknown, tempId: string) => unknown;
-      from?: (response: unknown) => unknown;
-      keepOnFail: boolean;
+      draft: (ctx: DraftCtx<unknown, unknown>) => unknown;
+      settle?: (response: unknown) => unknown;
     }
   | {
       kind: 'update';
       field: string;
       match?: (item: unknown, input: unknown) => boolean;
-      draft: (input: unknown) => unknown;
-      keepOnFail: boolean;
+      draft: (ctx: DraftCtx<unknown, unknown>) => unknown;
+      settle?: (ctx: SettleCtx<unknown, unknown, unknown>) => unknown;
     }
   | { kind: 'remove'; field: string; match?: (item: unknown, input: unknown) => boolean }
   | { kind: 'removeQuery' };
 
-export type MutationPlan<TParams, TInput, TResponse> = {
+/** Structural config read by runtime normalization — not part of the public API. */
+type RuntimeMutationConfig = {
+  removes?: true;
+  insert?: string;
+  prepend?: string;
+  update?: string;
+  remove?: string;
+  draft?: unknown;
+  settle?: unknown;
+  match?: unknown;
+};
+
+export type MutationPlan<TParams, TData, TInput, TResponse> = {
   name: string;
   query: { key: (params: TParams) => readonly unknown[] };
   request: (params: TParams, input?: TInput) => Promise<TResponse>;
   effect: Effect;
   validate?: (input: TInput) => void;
   remapInput: RemapInput<TInput>;
-  sync?: Sync<TParams, TInput, TResponse>;
+  sync?: Sync<TParams, TData, TInput, TResponse>;
 };
 
 /** Call with params to get TanStack `mutationOptions`: `useMutation(addComment(id))`. */
 export type MutationFactory<TParams, TInput, TResponse> = {
-  (params: TParams): UseMutationOptions<TResponse, Error, TInput, unknown>;
+  (params: TParams): UseMutationOptions<TResponse, DefineQueryMutationError, TInput, unknown>;
   /** Stable TanStack mutation key — `[...queryKey, name]`. */
   key: (params: TParams) => readonly unknown[];
   readonly __input?: TInput;
 };
 
-type AnyConfig = {
-  name?: string;
-  request: (...args: never[]) => Promise<unknown>;
-  validate?: (input: unknown) => void;
-  remapInput?: RemapInput<unknown>;
-  sync?: Sync<unknown, unknown, unknown>;
-  optimistic?: (data: unknown, input: unknown) => unknown;
-  settle?: (data: unknown, response: unknown) => unknown;
-  insert?: string;
-  prepend?: string;
-  update?: string;
-  remove?: string;
-  removes?: boolean;
-  draft?: (...args: never[]) => unknown;
-  from?: (response: unknown) => unknown;
-  match?: (item: unknown, input: unknown) => boolean;
-  keepOnFail?: boolean;
+type MutationConfigWithRequest<
+  TParams,
+  TData,
+  TInput,
+  TResponse,
+  TRest extends MutationRequestRest,
+> = MutationConfig<TParams, TData, TInput, TResponse> & {
+  request: (params: TParams, ...args: TRest) => Promise<TResponse>;
 };
 
-function normalizeEffect(config: AnyConfig): Effect {
+const mutationNamesByQuery = new WeakMap<object, Set<string>>();
+
+function registerMutationName(query: object, name: string): void {
+  if (!import.meta.env.DEV) return;
+  let names = mutationNamesByQuery.get(query);
+  if (!names) {
+    names = new Set();
+    mutationNamesByQuery.set(query, names);
+  }
+  if (names.has(name)) warnDuplicateMutationName(name);
+  names.add(name);
+}
+
+function toRuntimeConfig<
+  TParams,
+  TData,
+  TInput,
+  TResponse,
+  TRest extends MutationRequestRest,
+>(
+  config: MutationConfigWithRequest<TParams, TData, TInput, TResponse, TRest>,
+): RuntimeMutationConfig {
+  return {
+    removes: 'removes' in config && config.removes ? true : undefined,
+    insert: 'insert' in config ? config.insert : undefined,
+    prepend: 'prepend' in config ? config.prepend : undefined,
+    update: 'update' in config ? config.update : undefined,
+    remove: 'remove' in config ? config.remove : undefined,
+    draft: 'draft' in config ? config.draft : undefined,
+    settle: 'settle' in config ? config.settle : undefined,
+    match: 'match' in config ? config.match : undefined,
+  };
+}
+
+function normalizeEffect(config: RuntimeMutationConfig): Effect {
   if (config.removes) return { kind: 'removeQuery' };
 
   if (config.insert !== undefined || config.prepend !== undefined) {
+    const field = config.insert ?? config.prepend ?? '';
     return {
       kind: 'insert',
-      field: (config.insert ?? config.prepend) as string,
+      field,
       position: config.prepend !== undefined ? 'start' : 'end',
-      draft: config.draft as (input: unknown, tempId: string) => unknown,
-      from: config.from,
-      keepOnFail: config.keepOnFail ?? false,
+      draft: (config.draft ?? (() => undefined)) as (ctx: DraftCtx<unknown, unknown>) => unknown,
+      settle: config.settle as ((response: unknown) => unknown) | undefined,
     };
   }
 
@@ -218,48 +287,83 @@ function normalizeEffect(config: AnyConfig): Effect {
     return {
       kind: 'update',
       field: config.update,
-      match: config.match,
-      draft: config.draft as (input: unknown) => unknown,
-      keepOnFail: config.keepOnFail ?? false,
+      match: config.match as ((item: unknown, input: unknown) => boolean) | undefined,
+      draft: (config.draft ?? (() => undefined)) as (ctx: DraftCtx<unknown, unknown>) => unknown,
+      settle: config.settle as ((ctx: SettleCtx<unknown, unknown, unknown>) => unknown) | undefined,
     };
   }
 
   if (config.remove !== undefined) {
-    return { kind: 'remove', field: config.remove, match: config.match };
+    return {
+      kind: 'remove',
+      field: config.remove,
+      match: config.match as ((item: unknown, input: unknown) => boolean) | undefined,
+    };
   }
 
-  return { kind: 'object', optimistic: config.optimistic, settle: config.settle };
+  return {
+    kind: 'object',
+    draft: config.draft as ((ctx: DraftCtx<unknown, unknown>) => unknown) | undefined,
+    settle: config.settle as ((ctx: SettleCtx<unknown, unknown, unknown>) => unknown) | undefined,
+  };
 }
 
-function assertSingleOptimisticForm(config: AnyConfig): void {
+function assertSingleDraftForm(config: RuntimeMutationConfig): void {
+  const hasListForm =
+    config.removes
+    || config.insert !== undefined
+    || config.prepend !== undefined
+    || config.update !== undefined
+    || config.remove !== undefined;
+
   const forms = [
     config.removes ? 'removes' : undefined,
     config.insert !== undefined || config.prepend !== undefined ? 'insert' : undefined,
     config.update !== undefined ? 'update' : undefined,
     config.remove !== undefined ? 'remove' : undefined,
-    config.optimistic !== undefined || config.settle !== undefined ? 'object' : undefined,
+    !hasListForm && (config.draft !== undefined || config.settle !== undefined) ? 'object' : undefined,
   ].filter((form): form is string => form !== undefined);
 
   if (forms.length > 1) {
     throw new Error(
-      `[define-query] defineMutation: pick one optimistic form, got ${forms.join(' + ')}`,
+      `[define-query] defineMutation: pick one draft form, got ${forms.join(' + ')}`,
     );
   }
 }
 
-function makeFactory<TParams, TInput, TResponse>(
+function assertMutationName(name: string | undefined): asserts name is string {
+  if (!name) {
+    throw new Error('[define-query] defineMutation: `name` is required');
+  }
+}
+
+function makeFactory<
+  TParams,
+  TData,
+  TInput,
+  TResponse,
+  TRest extends MutationRequestRest,
+>(
+  queryRef: object,
   query: { key: (params: TParams) => readonly unknown[] },
-  config: AnyConfig,
+  config: MutationConfigWithRequest<TParams, TData, TInput, TResponse, TRest>,
 ): MutationFactory<TParams, TInput, TResponse> {
-  assertSingleOptimisticForm(config);
-  const plan: MutationPlan<TParams, TInput, TResponse> = {
-    name: config.name ?? 'mutation',
+  assertMutationName(config.name);
+  registerMutationName(queryRef, config.name);
+
+  const runtime = toRuntimeConfig(config);
+  assertSingleDraftForm(runtime);
+  const plan: MutationPlan<TParams, TData, TInput, TResponse> = {
+    name: config.name,
     query,
-    request: config.request as (params: TParams, input?: TInput) => Promise<TResponse>,
-    effect: normalizeEffect(config),
-    validate: config.validate as ((input: TInput) => void) | undefined,
-    remapInput: (config.remapInput ?? ['id']) as RemapInput<TInput>,
-    sync: config.sync as Sync<TParams, TInput, TResponse> | undefined,
+    request: (params, input) =>
+      input === undefined
+        ? (config.request as (p: TParams) => Promise<TResponse>)(params)
+        : (config.request as (p: TParams, i: TInput) => Promise<TResponse>)(params, input),
+    effect: normalizeEffect(runtime),
+    validate: config.validate,
+    remapInput: config.remapInput ?? (['id'] as RemapInput<TInput>),
+    sync: config.sync,
   };
 
   const mutationKeyFn = (params: TParams): readonly unknown[] =>
@@ -267,59 +371,48 @@ function makeFactory<TParams, TInput, TResponse>(
 
   const factory = (params: TParams): UseMutationOptions<
     TResponse,
-    Error,
+    DefineQueryMutationError,
     TInput,
     unknown
   > => ({
     mutationKey: mutationKeyFn(params),
-    // TanStack passes the active QueryClient as `ctx.client`, so callers never
-    // thread it themselves: `useMutation(addComment(id))`.
-    mutationFn: (input: TInput, ctx) =>
-      runMutation(ctx.client, plan, params, input) as Promise<TResponse>,
+    mutationFn: async (input: TInput, ctx) => {
+      try {
+        const result = await runMutation(ctx.client, plan, params, input);
+        return result as TResponse;
+      } catch (caught) {
+        throw toDefineQueryMutationError(caught);
+      }
+    },
   });
 
-  return Object.assign(factory, { key: mutationKeyFn }) as MutationFactory<TParams, TInput, TResponse>;
+  return Object.assign(factory, { key: mutationKeyFn });
 }
 
 /* ------------------------------------------------------------------ *
- * defineMutation — overloaded so TInput / TResponse infer from `request`.
- * A 2-arg request takes `(params, input)`; a 1-arg request takes `(params)`
- * with `void` input.
+ * defineMutation — `TInput` / `TResponse` infer from `request` arity + return.
  * ------------------------------------------------------------------ */
 
-type WithRequest2<TParams, TInput, TResponse> = {
-  request: (params: TParams, input: TInput) => Promise<TResponse>;
-};
-type WithRequest1<TParams, TResponse> = {
-  request: (params: TParams) => Promise<TResponse>;
-};
-
-// plain query, 1-arg request (void input) — checked first so 2-arg requests,
-// which are not assignable to a 1-arg signature, fall through to the 2-arg form.
-export function defineMutation<TParams, TData, TResponse>(
-  query: QueryFactory<TParams, TData>,
-  config: MutationConfig<TParams, TData, void, TResponse> & WithRequest1<TParams, TResponse>,
-): MutationFactory<TParams, void, TResponse>;
-// plain query, 2-arg request
-export function defineMutation<TParams, TData, TInput, TResponse>(
-  query: QueryFactory<TParams, TData>,
-  config: MutationConfig<TParams, TData, TInput, TResponse> & WithRequest2<TParams, TInput, TResponse>,
-): MutationFactory<TParams, TInput, TResponse>;
-// infinite query, 1-arg request (void input)
-export function defineMutation<TParams, TPage, TPageParam, TResponse>(
-  query: InfiniteQueryFactory<TParams, TPage, TPageParam>,
-  config: MutationConfig<TParams, InfiniteData<TPage>, void, TResponse>
-    & WithRequest1<TParams, TResponse>,
-): MutationFactory<TParams, void, TResponse>;
-// infinite query, 2-arg request
-export function defineMutation<TParams, TPage, TPageParam, TInput, TResponse>(
-  query: InfiniteQueryFactory<TParams, TPage, TPageParam>,
-  config: MutationConfig<TParams, InfiniteData<TPage>, TInput, TResponse>
-    & WithRequest2<TParams, TInput, TResponse>,
-): MutationFactory<TParams, TInput, TResponse>;
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-export function defineMutation(query: any, config: any): any {
-  return makeFactory(query as { key: (params: unknown) => readonly unknown[] }, config as AnyConfig);
+export function defineMutation<
+  const TQuery extends MutationQueryRef,
+  TRest extends MutationRequestRest,
+  TResponse,
+>(
+  query: TQuery,
+  config: MutationConfig<
+    QueryParams<TQuery>,
+    QueryData<TQuery>,
+    InferMutationInputFromRest<TRest>,
+    TResponse
+  > & {
+    request: (params: QueryParams<TQuery>, ...args: TRest) => Promise<TResponse>;
+  },
+): MutationFactory<
+  QueryParams<TQuery>,
+  InferMutationInputFromRest<TRest>,
+  TResponse
+> {
+  type TParams = QueryParams<TQuery>;
+  const key = query.key as (params: TParams) => readonly unknown[];
+  return makeFactory(query, { key: (params: TParams) => key(params) }, config);
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */

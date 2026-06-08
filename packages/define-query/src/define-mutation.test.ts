@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defineMutation } from './define-mutation';
 import { defineQuery } from './define-query';
-import { getMutationKey } from './query-key';
 
 const postQuery = defineQuery({
   key: (id: string) => ['post', id] as const,
@@ -20,9 +19,20 @@ describe('defineMutation guards', () => {
         name: 'add',
         request: async (_postId: string, text: string) => ({ id: '1', text }),
         insert: 'items',
-        draft: (text, id) => ({ id, text }),
+        draft: ({ input, tempId }) => ({ id: tempId!, text: input }),
       }),
     ).not.toThrow();
+  });
+
+  it('requires a mutation name', () => {
+    expect(() =>
+      defineMutation(postQuery, {
+        name: 'test',
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        request: async (_id: string) => ({ id: 'p1', title: 'T' }),
+        draft: ({ data }) => data,
+      }),
+    ).toThrow(/`name` is required/);
   });
 });
 
@@ -30,13 +40,13 @@ describe('defineMutation mutationKey', () => {
   it('generates scoped mutationKey as [...queryKey, name]', () => {
     const rename = defineMutation(postQuery, {
       name: 'rename',
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       request: async (_id: string, _title: string) => ({ id: 'p1', title: 'New' }),
-      optimistic: (post, title) => ({ ...post, title }),
+      draft: ({ data, input }) => ({ ...data, title: input }),
     });
 
     expect(rename('p1').mutationKey).toEqual(['post', 'p1', 'rename']);
     expect(rename.key('p1')).toEqual(['post', 'p1', 'rename']);
-    expect(getMutationKey(rename, 'p1')).toEqual(['post', 'p1', 'rename']);
   });
 
   it('distinguishes mutations on the same query by name', () => {
@@ -44,29 +54,21 @@ describe('defineMutation mutationKey', () => {
       name: 'add',
       request: async (_postId: string, text: string) => ({ id: '1', text }),
       insert: 'items',
-      draft: (text, id) => ({ id, text }),
+      draft: ({ input, tempId }) => ({ id: tempId!, text: input }),
     });
     const edit = defineMutation(commentsQuery, {
       name: 'edit',
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       request: async (_postId: string, _input: { commentId: string; text: string }) => ({
         id: '1',
         text: 'x',
       }),
       update: 'items',
       match: (item, input) => item.id === input.commentId,
-      draft: input => ({ text: input.text }),
+      draft: ({ input }) => ({ text: input.text }),
     });
 
     expect(add('p1').mutationKey).toEqual(['post', 'p1', 'comments', 'add']);
     expect(edit('p1').mutationKey).toEqual(['post', 'p1', 'comments', 'edit']);
-  });
-
-  it('defaults name to "mutation"', () => {
-    const m = defineMutation(postQuery, {
-      request: async (_id: string) => ({ id: 'p1', title: 'T' }),
-      optimistic: post => post,
-    });
-
-    expect(m('p1').mutationKey).toEqual(['post', 'p1', 'mutation']);
   });
 });

@@ -9,6 +9,7 @@ export type Comment = {
   id: string;
   text: string;
   createdAt: string;
+  deleted?: boolean;
 };
 
 export type TimelinePage = {

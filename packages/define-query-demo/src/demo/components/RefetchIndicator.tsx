@@ -1,9 +1,14 @@
+import { memo } from 'react';
+
 type Props = {
   active: boolean;
   label?: string;
 };
 
-export function RefetchIndicator({ active, label = 'Refetching' }: Props) {
+export const RefetchIndicator = memo(function RefetchIndicator({
+  active,
+  label = 'Refetching',
+}: Props) {
   return (
     <>
       <div
@@ -17,4 +22,4 @@ export function RefetchIndicator({ active, label = 'Refetching' }: Props) {
       </span>
     </>
   );
-}
+});

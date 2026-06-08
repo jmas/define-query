@@ -2,7 +2,6 @@ import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 import { defineMutation } from './define-mutation';
 import { defineQuery } from './define-query';
-import { getRowStore } from './client-state';
 import { getQueryKey } from './query-key';
 
 type Comment = { id: string; text: string };
@@ -14,8 +13,6 @@ const commentsQuery = defineQuery({
 
 const commentsKey = getQueryKey(commentsQuery, 'p1');
 
-// Invoke the built mutationFn with the input + a context carrying the client,
-// matching how TanStack calls it at runtime.
 const call = (client: QueryClient, options: { mutationFn?: unknown }, input?: unknown): Promise<unknown> =>
   (options.mutationFn as (i: unknown, ctx: { client: QueryClient }) => Promise<unknown>)(input, {
     client,
@@ -30,7 +27,6 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
-/** A request fn whose calls can be resolved out of band, in any order. */
 function controllable<TResult>() {
   const calls: { args: unknown[]; deferred: Deferred<TResult> }[] = [];
   const fn = (...args: unknown[]) => {
@@ -45,8 +41,6 @@ function items(client: QueryClient): Comment[] {
   return client.getQueryData<{ items: Comment[] }>(commentsKey)?.items ?? [];
 }
 
-// Flush microtasks so the optimistic write + `cancelQueries` settle and each
-// `request` has been invoked before we resolve its deferred.
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('overlapping mutations on one list query', () => {
@@ -61,7 +55,7 @@ describe('overlapping mutations on one list query', () => {
         server.fn(postId, input),
       update: 'items',
       match: (item, input) => item.id === input.commentId,
-      draft: (input: { commentId: string; text: string }) => ({ text: input.text }),
+      draft: ({ input }) => ({ text: input.text }),
     });
 
     const p1 = call(client, editComment('p1'), { commentId: 'c1', text: 'A' });
@@ -75,7 +69,6 @@ describe('overlapping mutations on one list query', () => {
     await Promise.all([p1, p2]);
 
     expect(items(client)).toEqual([{ id: 'c1', text: 'B' }]);
-    expect(getRowStore(client).statusOf(commentsKey, 'c1')).toBe('ok');
   });
 
   it('an add while a remove is pending keeps both effects isolated', async () => {
@@ -95,9 +88,8 @@ describe('overlapping mutations on one list query', () => {
       name: 'add',
       request: (postId: string, text: string) => addServer.fn(postId, text),
       insert: 'items',
-      draft: (text, id): Comment => ({ id, text }),
-      from: response => response.comment,
-      keepOnFail: true,
+      draft: ({ input, tempId }): Comment => ({ id: tempId!, text: input }),
+      settle: response => response.comment,
     });
 
     const removePromise = call(client, removeComment('p1'), 'c1');
@@ -123,9 +115,8 @@ describe('overlapping mutations on one list query', () => {
       name: 'add',
       request: (postId: string, text: string) => server.fn(postId, text),
       insert: 'items',
-      draft: (text, id): Comment => ({ id, text }),
-      from: response => response.comment,
-      keepOnFail: true,
+      draft: ({ input, tempId }): Comment => ({ id: tempId!, text: input }),
+      settle: response => response.comment,
     });
 
     const p1 = call(client, addComment('p1'), 'x');
@@ -133,13 +124,10 @@ describe('overlapping mutations on one list query', () => {
     expect(items(client)).toHaveLength(2);
 
     await tick();
-    // Resolve out of order to stress id reconciliation.
     server.calls[1].deferred.resolve({ comment: { id: 'srv-y', text: 'y' } });
     server.calls[0].deferred.resolve({ comment: { id: 'srv-x', text: 'x' } });
     await Promise.all([p1, p2]);
 
     expect(items(client).map(i => i.id).sort()).toEqual(['srv-x', 'srv-y']);
-    expect(getRowStore(client).statusOf(commentsKey, 'srv-x')).toBe('ok');
-    expect(getRowStore(client).statusOf(commentsKey, 'srv-y')).toBe('ok');
   });
 });

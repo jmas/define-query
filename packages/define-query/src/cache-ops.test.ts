@@ -62,6 +62,13 @@ describe('plain-object lists', () => {
 });
 
 describe('infinite-data lists', () => {
+  it('bootstraps the first page when pages are empty', () => {
+    const data = { pages: [] as { items: Item[] }[], pageParams: [] as number[] };
+    const inserted = insertItem(data, 'items', { id: '1', text: 'a' }, 'end');
+    expect(inserted.pages).toHaveLength(1);
+    expect(inserted.pages[0].items).toEqual([{ id: '1', text: 'a' }]);
+  });
+
   it('inserts at the first/last page', () => {
     const data = infinite([{ id: '1', text: 'a' }], [{ id: '2', text: 'b' }]);
     const start = insertItem(data, 'items', { id: '0', text: 'z' }, 'start');

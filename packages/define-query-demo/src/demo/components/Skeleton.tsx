@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import {
   chaosBoxCls,
   commentRowCls,
@@ -16,13 +17,13 @@ type SkeletonProps = {
   className?: string;
 };
 
-function Skeleton({ className = '' }: SkeletonProps) {
+const Skeleton = memo(function Skeleton({ className = '' }: SkeletonProps) {
   return <span className={`${pulseBlockCls} ${className}`.trim()} aria-hidden />;
-}
+});
 
 const TIMELINE_PAGE_SIZE = 3;
 
-export function TimelineListSkeleton() {
+export const TimelineListSkeleton = memo(function TimelineListSkeleton() {
   return (
     <ul
       className={timelineListCls}
@@ -40,9 +41,18 @@ export function TimelineListSkeleton() {
       ))}
     </ul>
   );
-}
+});
 
-export function PostPanelSkeleton() {
+export const CommentRowSkeleton = memo(function CommentRowSkeleton() {
+  return (
+    <li className={commentRowCls} role="status" aria-busy="true" aria-label="Loading comment">
+      <Skeleton className="h-9 min-w-0 flex-1 rounded-lg" />
+      <Skeleton className="h-4 w-14 rounded" />
+    </li>
+  );
+});
+
+export const PostPanelSkeleton = memo(function PostPanelSkeleton() {
   return (
     <div
       className={postSuspenseContentCls}
@@ -100,4 +110,4 @@ export function PostPanelSkeleton() {
       </section>
     </div>
   );
-}
+});

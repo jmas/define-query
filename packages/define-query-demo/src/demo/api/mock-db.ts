@@ -260,6 +260,14 @@ export function getComments(postId: string): Comment[] {
   return (comments.get(postId) ?? []).map(comment => ({ ...comment }));
 }
 
+export function getComment(postId: string, commentId: string): Comment | undefined {
+  const list = comments.get(postId);
+  if (!list) return undefined;
+  const comment = list.find(item => item.id === commentId);
+  if (!comment) return undefined;
+  return { ...comment };
+}
+
 export function addComment(
   postId: string,
   text: string,
@@ -290,12 +298,14 @@ export function removeComment(postId: string, commentId: string): boolean {
   const list = comments.get(postId);
   if (!list) return false;
 
-  const next = list.filter(comment => comment.id !== commentId);
-  if (next.length === list.length) return false;
+  const comment = list.find(item => item.id === commentId);
+  if (!comment) return false;
+  if (comment.deleted) return true;
+  comment.deleted = true;
+  comment.text = '';
 
-  comments.set(postId, next);
   const post = posts.find(item => item.id === postId);
-  if (post) post.commentCount = next.length;
+  if (post) post.commentCount = Math.max(0, post.commentCount - 1);
   return true;
 }
 
@@ -304,6 +314,7 @@ export function updateComment(postId: string, commentId: string, text: string): 
   if (!list) return undefined;
   const comment = list.find(item => item.id === commentId);
   if (!comment) return undefined;
+  if (comment.deleted) return undefined;
   comment.text = text.trim();
   return { ...comment };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defineInfiniteQuery, defineQuery, getQueryKey } from './define-query';
+import { defineInfiniteQuery, defineQuery } from './define-query';
 
 describe('defineQuery factory', () => {
   const postQuery = defineQuery({
@@ -15,9 +15,10 @@ describe('defineQuery factory', () => {
     await expect((opts.queryFn as () => Promise<unknown>)()).resolves.toEqual({ id: 'p1', title: 'T' });
   });
 
-  it('exposes key + infinite metadata for sync/targeting', () => {
+  it('exposes normalized key + infinite metadata', () => {
     expect(postQuery.infinite).toBe(false);
-    expect(getQueryKey(postQuery, 'p1')).toEqual(['post', 'p1']);
+    expect(postQuery.key('p1')).toEqual(['post', 'p1']);
+    expect(postQuery.key('p1')).toEqual(postQuery('p1').queryKey);
   });
 });
 

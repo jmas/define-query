@@ -1,11 +1,11 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { AnyQuery } from './define-query';
 import { getQueryKey } from './query-key';
-import { mergeObject, removeItem, updateItem } from './cache-ops';
+import { flattenInfiniteField, mergeObject, removeItem, updateItem } from './cache-ops';
 import { isPlainObject, readId } from './util';
 import type { SyncEvent, SyncOp } from './sync';
 
-type AnyEvent = SyncEvent<unknown, unknown, unknown>;
+type AnyEvent = SyncEvent<unknown, unknown, unknown, unknown>;
 
 function exactKey(query: AnyQuery, event: AnyEvent, params?: (event: AnyEvent) => unknown): readonly unknown[] {
   const target = params ? params(event) : event.params;
@@ -56,6 +56,22 @@ export function runSync(
         client.setQueryData(exactKey(op.query, event, op.params), current =>
           op.updater(current, event),
         );
+        break;
+      }
+
+      case 'setEach': {
+        const items =
+          event.item !== undefined
+            ? [event.item]
+            : event.data !== undefined
+              ? flattenInfiniteField(event.data, op.field)
+              : [];
+        for (const item of items) {
+          client.setQueryData(
+            getQueryKey(op.query, op.params(event, item)),
+            op.set(item, event),
+          );
+        }
         break;
       }
 

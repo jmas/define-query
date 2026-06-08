@@ -4,9 +4,9 @@ import { defineQuery } from './define-query';
 import { runSync } from './run-sync';
 import { createOnBuilder, type SyncEvent, type SyncOp } from './sync';
 
-type Event = SyncEvent<unknown, unknown, unknown>;
+type Event = SyncEvent<unknown, unknown, unknown, unknown>;
 const on = createOnBuilder<Event>();
-const run = (client: QueryClient, op: SyncOp<Event>, event: Event) =>
+const run = <E extends Event>(client: QueryClient, op: SyncOp<E>, event: E) =>
   runSync(client, [op] as readonly SyncOp<Event>[], event);
 
 const postQuery = defineQuery({
@@ -36,7 +36,7 @@ describe('runSync', () => {
     client.setQueryData(['list', { q: '' }], { items: [{ id: 'p1', title: 'old' }] });
     run(
       client,
-      on(listQuery).mergeItem<{ id: string; title: string }>('items', {
+      on(listQuery).mergeItem('items', {
         id: () => 'p1',
         set: () => ({ title: 'new' }),
       }),
@@ -69,5 +69,39 @@ describe('runSync', () => {
     const spy = vi.spyOn(client, 'invalidateQueries');
     run(client, on(postQuery).invalidate(), event('p1'));
     expect(spy).toHaveBeenCalledWith({ queryKey: ['post', 'p1'] });
+  });
+
+  it('setEach seeds a sibling from a single affected row', () => {
+    type Comment = { id: string; text: string };
+    type CommentsEvent = SyncEvent<string, string, undefined, { items: Comment[] }>;
+
+    const commentQuery = defineQuery({
+      key: (params: { postId: string; commentId: string }) =>
+        ['post', params.postId, 'comment', params.commentId] as const,
+      fetch: async () => ({ id: 'c1', text: 'x' }),
+    });
+    const onComments = createOnBuilder<CommentsEvent>();
+    const client = new QueryClient();
+    run(
+      client,
+      onComments(commentQuery).setEach('items', {
+        params: (event, item) => ({
+          postId: event.params,
+          commentId: item.id,
+        }),
+        set: item => item,
+      }),
+      {
+        params: 'p1',
+        input: 'hello',
+        response: undefined,
+        data: { items: [{ id: 'tmp_1', text: 'hello' }] },
+        item: { id: 'tmp_1', text: 'hello' },
+      },
+    );
+    expect(client.getQueryData(['post', 'p1', 'comment', 'tmp_1'])).toEqual({
+      id: 'tmp_1',
+      text: 'hello',
+    });
   });
 });

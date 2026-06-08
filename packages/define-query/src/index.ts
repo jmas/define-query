@@ -1,41 +1,41 @@
 // Query definitions — factories that produce native TanStack query options.
 // Use them with the native hooks: `useQuery(post(id))`, `useSuspenseQuery(...)`,
 // `useInfiniteQuery(...)`, and `queryClient.prefetchQuery(post(id))`.
-export { defineQuery, defineInfiniteQuery, getQueryKey } from './define-query';
+export { defineQuery, defineInfiniteQuery } from './define-query';
 export type {
   QueryFactory,
   InfiniteQueryFactory,
+  MutationQueryRef,
   QueryTanStackOptions,
   InfiniteTanStackOptions,
+  QueryFetchSyncEvent,
 } from './define-query';
 
 // Mutation definition — a factory producing native TanStack mutation options.
 // Use it with the native hook: `useMutation(addComment(postId))`.
 export { defineMutation } from './define-mutation';
-export type { MutationConfig, MutationFactory, ListItem } from './define-mutation';
+export type {
+  MutationConfig,
+  MutationFactory,
+  DraftCtx,
+  SettleCtx,
+  ListItem,
+  InferMutationInputFromRest,
+  InferMutationInput,
+  InferMutationResponse,
+} from './define-mutation';
 
-// Per-row optimistic state (pending / failed / retry) for list items.
-export { useRowState } from './use-row-state';
-export type { RowState } from './row-store';
+// Client setup
+export { setupDefineQuery } from './client-state';
 
 // Sync builder types
 export type { SyncEvent, SyncOp, OnBuilder, QuerySync } from './sync';
 
 // Errors
-export {
-  fail,
-  classify,
-  fieldError,
-  errorText,
-  generalErrorText,
-  isValidationError,
-  isRowFailure,
-  rowFailureId,
-  RowFailure,
-} from './errors';
+export { fail, DefineQueryMutationError, isMutationError } from './errors';
 export type { MutationError, ValidationFields } from './errors';
 
 // Utilities
 export { flattenInfiniteField } from './cache-ops';
-export { isTempId } from './temp-id';
-export { getMutationKey } from './query-key';
+export { isTempId, createTempId } from './temp-id';
+export type { SyncListFieldOf, SyncFieldItem, SyncDataShape } from './sync-list-types';

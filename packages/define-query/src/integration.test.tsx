@@ -4,9 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineMutation } from './define-mutation';
 import { defineQuery } from './define-query';
-import { getRowStore } from './client-state';
-import { fail, isRowFailure, rowFailureId } from './errors';
-import { useRowState } from './use-row-state';
+import { fail } from './errors';
 
 type Comment = { id: string; text: string };
 
@@ -23,22 +21,18 @@ const addComment = defineMutation(commentsQuery, {
     return { comment: { id: `srv-${text}`, text } };
   },
   insert: 'items',
-  draft: (text, id): Comment => ({ id, text }),
-  from: response => response.comment,
-  keepOnFail: true,
+  draft: ({ input, tempId }): Comment => ({ id: tempId!, text: input }),
+  settle: response => response.comment,
 });
 
 function Comments({ postId }: { postId: string }) {
   const { data } = useQuery(commentsQuery(postId));
   const add = useMutation(addComment(postId));
-  const rowState = useRowState(commentsQuery, postId);
   return (
-    <div data-row-failure-id={isRowFailure(add.error) ? rowFailureId(add.error) : undefined}>
+    <div>
       <ul>
         {data?.items.map(comment => (
-          <li key={comment.id} data-status={rowState(comment).status}>
-            {comment.text}
-          </li>
+          <li key={comment.id}>{comment.text}</li>
         ))}
       </ul>
       <button type="button" onClick={() => add.mutate('hi')}>
@@ -47,6 +41,7 @@ function Comments({ postId }: { postId: string }) {
       <button type="button" onClick={() => add.mutate('boom')}>
         add-fail
       </button>
+      {add.error && <span data-testid="error">{(add.error as Error).message}</span>}
     </div>
   );
 }
@@ -61,35 +56,32 @@ function renderWithClient(node: ReactNode) {
 
 afterEach(() => {
   cleanup();
-  if (testClient) getRowStore(testClient)._reset();
 });
 
-describe('native useMutation + useRowState', () => {
-  it('shows an optimistic row that settles to the server id', async () => {
+describe('native useMutation', () => {
+  it('shows a draft row that settles to the server id', async () => {
     renderWithClient(<Comments postId="p1" />);
 
     act(() => screen.getByText('add').click());
 
-    const optimistic = await screen.findByText('hi');
-    expect(optimistic.getAttribute('data-status')).toBe('pending');
+    await screen.findByText('hi');
 
     await waitFor(() => {
-      expect(screen.getByText('hi').getAttribute('data-status')).toBe('ok');
+      const items = testClient.getQueryData<{ items: Comment[] }>(['post', 'p1', 'comments'])!.items;
+      expect(items[0].id).toBe('srv-hi');
     });
   });
 
-  it('keeps a failed row marked as failed and sets RowFailure on mutation.error', async () => {
+  it('rolls back the draft row and surfaces mutation.error on failure', async () => {
     renderWithClient(<Comments postId="p1" />);
 
     act(() => screen.getByText('add-fail').click());
 
     await waitFor(() => {
-      expect(screen.getByText('boom').getAttribute('data-status')).toBe('failed');
+      expect(screen.getByTestId('error').textContent).toBe('offline');
     });
 
-    await waitFor(() => {
-      const failureId = document.querySelector('[data-row-failure-id]')?.getAttribute('data-row-failure-id');
-      expect(failureId).toBeTruthy();
-    });
+    const items = testClient.getQueryData<{ items: Comment[] }>(['post', 'p1', 'comments'])!.items;
+    expect(items).toHaveLength(0);
   });
 });

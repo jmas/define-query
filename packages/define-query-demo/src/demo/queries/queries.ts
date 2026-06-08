@@ -10,14 +10,25 @@ export const postQuery = defineQuery({
   },
 });
 
+export const commentQuery = defineQuery({
+  key: (params: { postId: string; commentId: string }) =>
+    ['post', params.postId, 'comment', params.commentId] as const,
+  fetch: (params: { postId: string; commentId: string }) =>
+    demoApi.getComment(params.postId, params.commentId),
+  options: {
+    staleTime: 30_000,
+  },
+});
+
 export const postCommentsQuery = defineQuery({
   key: (postId: string) => ['post', postId, 'comments'] as const,
   fetch: (postId: string) => demoApi.getComments(postId),
-});
-
-export const timelineQuery = defineQuery({
-  key: (params: { q: string; page: number }) => ['timeline', params] as const,
-  fetch: (params: { q: string; page: number }) => demoApi.getTimeline(params.q, params.page),
+  sync: on => [
+    on(commentQuery).setEach('items', {
+      params: (event, item) => ({ postId: event.params, commentId: item.id }),
+      set: item => item,
+    }),
+  ],
 });
 
 export const timelineInfiniteQuery = defineInfiniteQuery({

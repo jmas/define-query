@@ -1,27 +1,27 @@
 import { defineMutation } from 'define-query';
 import { demoApi } from '../api';
-import type { Comment, Post } from '../api/types';
-import { postCommentsQuery, postQuery, timelineInfiniteQuery, timelineQuery } from './queries';
+import type { Comment } from '../api/types';
+import { commentQuery, postCommentsQuery, postQuery, timelineInfiniteQuery } from './queries';
 
-export { postCommentsQuery } from './queries';
+export { commentQuery, postCommentsQuery } from './queries';
 
 export const addCommentMutation = defineMutation(postCommentsQuery, {
   name: 'add',
   request: (postId: string, text: string) => demoApi.addComment(postId, text),
   insert: 'items',
-  draft: (text, id): Comment => ({
-    id,
-    text,
+  draft: ({ input, tempId }): Comment => ({
+    id: tempId!,
+    text: input,
     createdAt: new Date().toISOString(),
   }),
-  from: response => response.comment,
-  keepOnFail: true,
+  settle: response => response.comment,
   sync: on => [
-    on(postQuery).bump('commentCount', 1),
-    on(timelineInfiniteQuery).mergeItem<Post>('items', {
-      set: item => ({ commentCount: item.commentCount + 1 }),
+    on(commentQuery).setEach('items', {
+      params: (event, item) => ({ postId: event.params, commentId: item.id }),
+      set: item => item,
     }),
-    on(timelineQuery).mergeItem<Post>('items', {
+    on(postQuery).bump('commentCount', 1),
+    on(timelineInfiniteQuery).mergeItem('items', {
       set: item => ({ commentCount: item.commentCount + 1 }),
     }),
   ],
@@ -30,27 +30,23 @@ export const addCommentMutation = defineMutation(postCommentsQuery, {
 export const editCommentMutation = defineMutation(postCommentsQuery, {
   name: 'edit',
   remapInput: ['commentId'],
-  request: async (postId: string, { commentId, text }: { commentId: string; text: string }) => {
-    const { comment } = await demoApi.updateComment(postId, commentId, text);
-    return comment;
-  },
+  request: (postId: string, { commentId, text }: { commentId: string; text: string }) =>
+    demoApi.updateComment(postId, commentId, text),
   update: 'items',
   match: (item, input) => item.id === input.commentId,
-  draft: (input: { commentId: string; text: string }) => ({ text: input.text }),
-  keepOnFail: true,
+  draft: ({ input }) => ({ text: input.text }),
 });
 
 export const removeCommentMutation = defineMutation(postCommentsQuery, {
   name: 'remove',
+  remapInput: ['commentId'],
   request: (postId: string, commentId: string) => demoApi.deleteComment(postId, commentId),
   remove: 'items',
   match: (item, commentId) => item.id === commentId,
   sync: on => [
-    on(postQuery).bump('commentCount', -1),
-    on(timelineInfiniteQuery).mergeItem<Post>('items', {
-      set: item => ({ commentCount: Math.max(0, item.commentCount - 1) }),
-    }),
-    on(timelineQuery).mergeItem<Post>('items', {
+    on(postQuery).bump('commentCount', -1, { params: ({ params }) => params }),
+    on(timelineInfiniteQuery).mergeItem('items', {
+      id: ({ params }) => params,
       set: item => ({ commentCount: Math.max(0, item.commentCount - 1) }),
     }),
   ],

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildMutationKey,
-  getMutationKey,
   getQueryKey,
   normalizeParams,
   serializeKey,
@@ -79,13 +78,6 @@ describe('buildMutationKey', () => {
     expect(buildMutationKey(query, 'add', { q: 'x' })).toEqual(
       buildMutationKey(query, 'add', { q: 'x' }),
     );
-  });
-});
-
-describe('getMutationKey', () => {
-  it('reads the key from a mutation factory', () => {
-    const mutation = { key: (id: string) => ['post', id, 'rename'] as const };
-    expect(getMutationKey(mutation, 'p1')).toEqual(['post', 'p1', 'rename']);
   });
 });
 

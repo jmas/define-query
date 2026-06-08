@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
-import { clearRowStoreForQuery, getRowStore, getSettledIds } from './client-state';
+import { getSettledIds, setupDefineQuery } from './client-state';
 import { defineMutation } from './define-mutation';
 import { defineQuery } from './define-query';
 import { getQueryKey } from './query-key';
@@ -29,17 +29,6 @@ const call = (
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('per-QueryClient isolation', () => {
-  it('row state in client A is not visible in client B', () => {
-    const clientA = new QueryClient();
-    const clientB = new QueryClient();
-    const key = getQueryKey(commentsQuery, 'p1');
-
-    getRowStore(clientA).tagPending(key, 'c1', { mutation: 'add' });
-
-    expect(getRowStore(clientA).statusOf(key, 'c1')).toBe('pending');
-    expect(getRowStore(clientB).statusOf(key, 'c1')).toBe('ok');
-  });
-
   it('settledIds in client A do not affect client B', () => {
     const clientA = new QueryClient();
     const clientB = new QueryClient();
@@ -62,8 +51,8 @@ describe('lifecycle cleanup', () => {
       name: 'add',
       request: async (_postId: string, text: string) => ({ comment: { id: 'srv1', text } }),
       insert: 'items',
-      draft: (text, id): Comment => ({ id, text }),
-      from: response => response.comment,
+      draft: ({ input, tempId }): Comment => ({ id: tempId!, text: input }),
+      settle: response => response.comment,
     });
 
     await call(client, addComment('p1'), 'hi');
@@ -99,22 +88,7 @@ describe('lifecycle cleanup', () => {
     expect(capturedId).not.toBe('srv1');
   });
 
-  it('clearRowStoreForQuery drops all row metadata for a key', () => {
-    const client = new QueryClient();
-    const key = getQueryKey(commentsQuery, 'p1');
-    const store = getRowStore(client);
-
-    store.tagPending(key, 'c1', { mutation: 'add' });
-    store.tagPending(key, 'c2', { mutation: 'add' });
-    expect(store.statusOf(key, 'c1')).toBe('pending');
-
-    clearRowStoreForQuery(client, key);
-
-    expect(store.statusOf(key, 'c1')).toBe('ok');
-    expect(store.statusOf(key, 'c2')).toBe('ok');
-  });
-
-  it('removeQuery clears row store and settledIds for the query', async () => {
+  it('removeQuery clears settledIds for the query', async () => {
     const client = new QueryClient();
     const key = getQueryKey(postQuery, 'p1');
     client.setQueryData(key, { id: 'p1', title: 'T', commentCount: 0 });
@@ -125,29 +99,27 @@ describe('lifecycle cleanup', () => {
       removes: true,
     });
 
-    getRowStore(client).tagPending(key, 'p1', { mutation: 'x' });
     getSettledIds(client).set('tmp_p1', 'p1');
 
     await call(client, removePost('p1'));
     await tick();
 
-    expect(getRowStore(client).statusOf(key, 'p1')).toBe('ok');
     expect(getSettledIds(client).size).toBe(0);
     expect(client.getQueryData(key)).toBeUndefined();
   });
 
-  it('QueryCache removed event clears row store for externally removed queries', async () => {
+  it('QueryCache removed event clears settledIds for externally removed queries', async () => {
     const client = new QueryClient();
+    setupDefineQuery(client);
     const key = getQueryKey(commentsQuery, 'p1');
     client.setQueryData(key, { items: [{ id: 'c1', text: 'a' }] });
 
-    // Prime the cache subscriber.
-    getRowStore(client).tagPending(key, 'c1', { mutation: 'add' });
-    expect(getRowStore(client).statusOf(key, 'c1')).toBe('pending');
+    getSettledIds(client).set('tmp_c1', 'c1');
+    expect(getSettledIds(client).size).toBe(1);
 
     client.removeQueries({ queryKey: key });
     await tick();
 
-    expect(getRowStore(client).statusOf(key, 'c1')).toBe('ok');
+    expect(getSettledIds(client).size).toBe(0);
   });
 });

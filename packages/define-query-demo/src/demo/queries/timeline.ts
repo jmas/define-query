@@ -1,9 +1,9 @@
 import { defineMutation, fail } from 'define-query';
 import { demoApi } from '../api';
 import type { Post } from '../api/types';
-import { postCommentsQuery, postQuery, timelineInfiniteQuery, timelineQuery } from './queries';
+import { postCommentsQuery, postQuery, timelineInfiniteQuery } from './queries';
 
-export { timelineInfiniteQuery, timelineQuery } from './queries';
+export { timelineInfiniteQuery } from './queries';
 
 export const createTimelinePostMutation = defineMutation(timelineInfiniteQuery, {
   name: 'create',
@@ -14,27 +14,14 @@ export const createTimelinePostMutation = defineMutation(timelineInfiniteQuery, 
     if (!body.trim()) throw fail.validation({ body: ['Body cannot be empty'] });
   },
   prepend: 'items',
-  draft: (input, id): Post => ({
-    id,
+  draft: ({ input, tempId }): Post => ({
+    id: tempId!,
     title: input.title.trim(),
     body: input.body.trim(),
     commentCount: 0,
   }),
-  from: response => response,
-  keepOnFail: true,
+  settle: response => response,
   sync: on => [
-    on(timelineQuery).set(
-      (current, { response }) => {
-        if (!current) return { items: [response], total: 1, page: 1, pageSize: 10 };
-        const index = current.items.findIndex(item => item.id === response.id);
-        const items =
-          index >= 0
-            ? current.items.map(item => (item.id === response.id ? { ...item, ...response } : item))
-            : [response, ...current.items];
-        return { ...current, items };
-      },
-      { params: () => ({ q: '', page: 1 }) },
-    ),
     on(postQuery).set((_current, { response }) => response, {
       params: ({ response }) => response.id,
     }),

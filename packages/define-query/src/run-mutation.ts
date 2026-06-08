@@ -1,18 +1,17 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { applyOptimistic, applySettle, keepsOnFail, rollback } from './apply';
+import { applyDraft, applySettle, rollback } from './apply';
+import { findItem } from './cache-ops';
 import {
-  clearRowStoreForQuery,
   forgetSettledId,
   forgetSettledIdsFromData,
-  getRowStore,
   getSettledIds,
 } from './client-state';
 import type { MutationPlan, RemapInput } from './define-mutation';
-import { classify, errorMessage, rowFailure } from './errors';
+import { warnMutateWithoutCache } from './dev-warnings';
 import { getQueryKey } from './query-key';
 import { runSync } from './run-sync';
 import { createOnBuilder, type SyncEvent, type SyncOp } from './sync';
-import { isPlainObject } from './util';
+import { readId } from './util';
 
 const DEFAULT_REMAP_INPUT = ['id'] as const;
 
@@ -63,83 +62,108 @@ export function remapIds(
   if (typeof remapInput === 'function') {
     return remapInput(value, id => remapString(settledIds, id));
   }
-  if (isPlainObject(value)) return remapPlainObject(settledIds, value, remapInput);
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return remapPlainObject(settledIds, value as Record<string, unknown>, remapInput);
+  }
   return value;
 }
 
-type RunOptions = { retryRowId?: string };
-
 /**
- * The orchestration that powers a mutation: optimistic update -> request ->
- * settle / rollback / keep-failed, then sync siblings. Resolves with the server
- * response on success; rethrows on failure so the native `useMutation` surfaces
- * it. Row-scoped failures (`keepOnFail`) rethrow as `RowFailure` after tagging
- * the sidecar store.
+ * The orchestration that powers a mutation: draft -> request ->
+ * settle / rollback, then sync siblings. Resolves with the server response on
+ * success; rethrows on failure so the native `useMutation` surfaces it.
  */
-export async function runMutation<TParams, TInput, TResponse>(
+export async function runMutation<TParams, TData, TInput, TResponse>(
   client: QueryClient,
-  plan: MutationPlan<TParams, TInput, TResponse>,
+  plan: MutationPlan<TParams, TData, TInput, TResponse>,
   params: TParams,
   input: TInput | undefined,
-  opts: RunOptions = {},
 ): Promise<TResponse | undefined> {
   const effect = plan.effect;
   const queryKey = getQueryKey(plan.query, params);
   const ctx = { client, queryKey, mutation: plan.name };
-  const rowStore = getRowStore(client);
 
-  if (!opts.retryRowId && plan.validate && input !== undefined) {
+  if (plan.validate && input !== undefined) {
     plan.validate(input);
   }
 
-  // Apply the optimistic update synchronously so the UI reflects it on `mutate`,
-  // then cancel in-flight fetches so a refetch cannot clobber it.
-  const previous = client.getQueryData(queryKey);
-
-  let rowId: string | undefined;
-  let tempId: string | undefined;
-  let skipRequest = false;
-  // Whether we actually mutated the cache (so a refetch could clobber us).
-  let didOptimisticWrite = false;
-
-  if (opts.retryRowId) {
-    rowStore.clearForRetry(queryKey, opts.retryRowId);
-    rowId = opts.retryRowId;
-    if (effect.kind === 'insert') tempId = opts.retryRowId;
-    didOptimisticWrite = true; // the row is already in the cache being retried
-  } else if (previous !== undefined && effect.kind !== 'removeQuery') {
-    const optimistic = applyOptimistic(effect, previous, input, ctx);
-    rowId = optimistic.rowId;
-    tempId = optimistic.tempId;
-    skipRequest = optimistic.skipRequest ?? false;
-    // An object mutation without `optimistic` returns the same reference — no
-    // write happened, so there is nothing to protect against a refetch.
-    if (optimistic.next !== undefined && optimistic.next !== previous) {
-      client.setQueryData(queryKey, optimistic.next);
-      didOptimisticWrite = true;
-    }
-  }
-
-  // Only cancel in-flight fetches when we wrote (or when we are about to remove
-  // the query), so a no-op object mutation does not churn the query.
-  if (didOptimisticWrite || effect.kind === 'removeQuery') {
-    await client.cancelQueries({ queryKey });
-  }
-
-  const runSyncOps = (response: TResponse | undefined) => {
+  const runSyncOps = (
+    response: TResponse | undefined,
+    data?: unknown,
+    item?: unknown,
+  ) => {
     if (!plan.sync || skipRequest) return;
-    const event: SyncEvent<TParams, TInput, TResponse> = {
+    const event: SyncEvent<TParams, TInput, TResponse, TData> = {
       params,
       input: input as TInput,
       response: response as TResponse,
+      data: data as TData | undefined,
+      item,
     };
-    const ops = plan.sync(createOnBuilder<SyncEvent<TParams, TInput, TResponse>>());
+    const ops = plan.sync(createOnBuilder<SyncEvent<TParams, TInput, TResponse, TData>>());
     runSync(
       client,
       ops as readonly SyncOp<SyncEvent<unknown, unknown, unknown>>[],
       event as SyncEvent<unknown, unknown, unknown>,
     );
   };
+
+  const runSetEachSync = (data: unknown, item: unknown, response?: TResponse) => {
+    if (!plan.sync || item === undefined) return;
+    const event: SyncEvent<TParams, TInput, TResponse, TData> = {
+      params,
+      input: input as TInput,
+      response: response as TResponse,
+      data: data as TData | undefined,
+      item,
+    };
+    const ops = plan.sync(createOnBuilder<SyncEvent<TParams, TInput, TResponse, TData>>()).filter(
+      op => op.kind === 'setEach',
+    );
+    if (ops.length === 0) return;
+    runSync(
+      client,
+      ops as readonly SyncOp<SyncEvent<unknown, unknown, unknown>>[],
+      event as SyncEvent<unknown, unknown, unknown>,
+    );
+  };
+
+  // Apply the draft synchronously so the UI reflects it on `mutate`, then cancel
+  // in-flight fetches so a refetch cannot clobber it.
+  const previous = client.getQueryData(queryKey);
+
+  let rowId: string | undefined;
+  let tempId: string | undefined;
+  let skipRequest = false;
+  // Whether we actually mutated the cache (so a refetch could clobber us).
+  let didDraftWrite = false;
+
+  if (previous === undefined && effect.kind !== 'removeQuery') {
+    warnMutateWithoutCache(plan.name);
+  }
+
+  if (previous !== undefined && effect.kind !== 'removeQuery') {
+    const drafted = applyDraft(effect, previous, input, ctx);
+    rowId = drafted.rowId;
+    tempId = drafted.tempId;
+    skipRequest = drafted.skipRequest ?? false;
+    // An object mutation without `draft` returns the same reference — no write
+    // happened, so there is nothing to protect against a refetch.
+    if (drafted.next !== undefined && drafted.next !== previous) {
+      client.setQueryData(queryKey, drafted.next);
+      didDraftWrite = true;
+      if (effect.kind === 'insert' && tempId) {
+        const inserted = findItem(drafted.next, effect.field, row => readId(row) === tempId);
+        runSetEachSync(drafted.next, inserted);
+      }
+    }
+  }
+
+  // Only cancel in-flight fetches when we wrote (or when we are about to remove
+  // the query), so a no-op object mutation does not churn the query.
+  if (didDraftWrite || effect.kind === 'removeQuery') {
+    await client.cancelQueries({ queryKey });
+  }
 
   try {
     const remappedInput =
@@ -153,44 +177,38 @@ export async function runMutation<TParams, TInput, TResponse>(
       // synchronously here would tear the cache out from under a component that
       // is still rendering with this query.
       runSyncOps(response);
-      clearRowStoreForQuery(client, queryKey);
       forgetSettledIdsFromData(client, client.getQueryData(queryKey));
       queueMicrotask(() => client.removeQueries({ queryKey }));
       return response;
     }
 
     const current = client.getQueryData(queryKey);
+    let settledItem: unknown;
     if (current !== undefined) {
       const next = applySettle(effect, current, response, {
         ...ctx,
+        input,
         rowId,
         tempId,
         onSettle: (from, to) => getSettledIds(client).set(from, to),
       });
       client.setQueryData(queryKey, next);
 
+      if (effect.kind === 'insert' && tempId) {
+        settledItem =
+          effect.settle !== undefined && response !== undefined
+            ? effect.settle(response)
+            : findItem(next, effect.field, row => readId(row) !== tempId);
+      }
+
       if (effect.kind === 'remove' && rowId) {
         forgetSettledId(client, rowId);
       }
     }
 
-    runSyncOps(response);
+    runSyncOps(response, current !== undefined ? client.getQueryData(queryKey) : undefined, settledItem);
     return response;
   } catch (caught) {
-    const failure = classify(caught);
-
-    if (keepsOnFail(effect, rowId)) {
-      rowStore.markFailed(queryKey, rowId!, {
-        mutation: plan.name,
-        message: errorMessage(failure),
-        retry: (override?: unknown) =>
-          runMutation(client, plan, params, (override ?? input) as TInput | undefined, {
-            retryRowId: rowId,
-          }),
-      });
-      throw rowFailure(caught, rowId!, plan.name);
-    }
-
     const current = client.getQueryData(queryKey);
     if (effect.kind === 'object') {
       if (previous !== undefined) client.setQueryData(queryKey, previous);

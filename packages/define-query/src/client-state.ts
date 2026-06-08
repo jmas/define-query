@@ -1,30 +1,25 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { RowStore } from './row-store';
+import { handleQueryFetchSync } from './query-fetch-sync';
 import { isInfiniteData, isPlainObject, readId } from './util';
 
-const rowStores = new WeakMap<QueryClient, RowStore>();
 const settledIdsByClient = new WeakMap<QueryClient, Map<string, string>>();
 const subscribedClients = new WeakSet<QueryClient>();
 
-/** Subscribe to cache removal + ensure per-client maps exist. */
-function ensureClientState(client: QueryClient): void {
+/**
+ * Wire define-query into a QueryClient — call once after `new QueryClient()`.
+ * Required for query fetch sync (`sync` on `defineQuery` / `defineInfiniteQuery`).
+ */
+export function setupDefineQuery(client: QueryClient): void {
   ensureCacheCleanup(client);
 }
 
-/** Per-client row metadata store (pending / failed / retry). */
-export function getRowStore(client: QueryClient): RowStore {
-  ensureClientState(client);
-  let store = rowStores.get(client);
-  if (!store) {
-    store = new RowStore();
-    rowStores.set(client, store);
-  }
-  return store;
+/** Whether `setupDefineQuery` has been called for this client. */
+export function isDefineQuerySetup(client: QueryClient): boolean {
+  return subscribedClients.has(client);
 }
 
-/** Per-client tempId → serverId map for in-flight optimistic reconciliation. */
+/** Per-client tempId → serverId map for in-flight draft reconciliation. */
 export function getSettledIds(client: QueryClient): Map<string, string> {
-  ensureClientState(client);
   let map = settledIdsByClient.get(client);
   if (!map) {
     map = new Map();
@@ -41,11 +36,6 @@ export function forgetSettledId(client: QueryClient, id: string): void {
   for (const [temp, server] of map) {
     if (server === id) map.delete(temp);
   }
-}
-
-/** Drop all row metadata for a query key. */
-export function clearRowStoreForQuery(client: QueryClient, queryKey: readonly unknown[]): void {
-  getRowStore(client).clearQuery(queryKey);
 }
 
 /** Forget settled-id mappings for every list item id found in cached query data. */
@@ -81,9 +71,11 @@ function ensureCacheCleanup(client: QueryClient): void {
   if (subscribedClients.has(client)) return;
   subscribedClients.add(client);
   client.getQueryCache().subscribe(event => {
-    if (event.type !== 'removed') return;
-    const queryKey = event.query.queryKey;
-    clearRowStoreForQuery(client, queryKey);
-    forgetSettledIdsFromData(client, event.query.state.data);
+    if (event.type === 'removed') {
+      forgetSettledIdsFromData(client, event.query.state.data);
+      return;
+    }
+
+    handleQueryFetchSync(client, event);
   });
 }

@@ -1,3 +1,4 @@
+import { warnCollapsedParams } from './dev-warnings';
 import { isPlainObject } from './util';
 
 /** Anything that owns a `key(params)` builder (queries + mutations). */
@@ -33,14 +34,9 @@ function shallowKeyObject(obj: Record<string, unknown>): Record<string, unknown>
   return out;
 }
 
-/** Dev-only warning when params cannot be stably keyed. Exported for tests. */
+/** Warning when params cannot be stably keyed. Exported for tests. */
 export function warnIfParamsCollapsed(params: unknown): void {
-  if (import.meta.env.DEV) {
-    console.warn(
-      '[define-query] normalizeParams: nested/non-serializable params collapsed to {}. Use a flat key object.',
-      params,
-    );
-  }
+  warnCollapsedParams(params);
 }
 
 /** Normalize params before keying. Scalars pass through; one-level objects get sorted. */

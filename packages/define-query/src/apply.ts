@@ -6,8 +6,7 @@ import {
   removeItem,
   updateItem,
 } from './cache-ops';
-import { getRowStore } from './client-state';
-import type { Effect } from './define-mutation';
+import type { DraftCtx, Effect } from './define-mutation';
 import { createTempId, isTempId } from './temp-id';
 import { isPlainObject, readId } from './util';
 
@@ -17,7 +16,7 @@ export type ApplyCtx = {
   mutation: string;
 };
 
-export type OptimisticResult = {
+export type DraftResult = {
   next: unknown;
   rowId?: string;
   tempId?: string;
@@ -40,21 +39,30 @@ function matcher(
   return item => id !== undefined && readId(item) === id;
 }
 
-/** Apply the optimistic update to a cache snapshot. Pure w.r.t. `data`; tags the row store. */
-export function applyOptimistic(
+function draftCtx(
+  data: unknown,
+  input: unknown,
+  extra?: { tempId?: string; item?: unknown },
+): DraftCtx<unknown, unknown> {
+  return { data, input, ...extra };
+}
+
+/** Apply the draft update to a cache snapshot. Pure w.r.t. `data`. */
+export function applyDraft(
   effect: Effect,
   data: unknown,
   input: unknown,
-  ctx: ApplyCtx,
-): OptimisticResult {
+  _ctx: ApplyCtx,
+): DraftResult {
   switch (effect.kind) {
     case 'object':
-      return { next: effect.optimistic ? effect.optimistic(data, input) : data };
+      return {
+        next: effect.draft ? effect.draft(draftCtx(data, input)) : data,
+      };
 
     case 'insert': {
       const tempId = createTempId();
-      const item = effect.draft(input, tempId);
-      getRowStore(ctx.client).tagPending(ctx.queryKey, tempId, { mutation: ctx.mutation });
+      const item = effect.draft(draftCtx(data, input, { tempId }));
       return {
         next: insertItem(data, effect.field, item, effect.position),
         rowId: tempId,
@@ -66,11 +74,8 @@ export function applyOptimistic(
       const match = matcher(effect.match, input);
       const matched = findItem(data, effect.field, match);
       const rowId = readId(matched);
-      const patch = effect.draft(input);
+      const patch = effect.draft(draftCtx(data, input, { item: matched }));
       const next = updateItem(data, effect.field, match, item => mergeObject(item, patch));
-      if (rowId) {
-        getRowStore(ctx.client).tagPending(ctx.queryKey, rowId, { mutation: ctx.mutation });
-      }
       return { next, rowId };
     }
 
@@ -90,7 +95,8 @@ export function applyOptimistic(
   }
 }
 
-export type SettleCtx = ApplyCtx & {
+export type ApplySettleCtx = ApplyCtx & {
+  input: unknown;
   rowId?: string;
   tempId?: string;
   /** Record a temp id that settled to a server id (for later edits/removes). */
@@ -102,38 +108,50 @@ export function applySettle(
   effect: Effect,
   data: unknown,
   response: unknown,
-  ctx: SettleCtx,
+  ctx: ApplySettleCtx,
 ): unknown {
+  const base = draftCtx(data, ctx.input, { item: ctx.rowId ? findItemByRowId(data, effect, ctx.rowId) : undefined });
+
   switch (effect.kind) {
     case 'object':
-      if (effect.settle) return effect.settle(data, response);
+      if (effect.settle) {
+        return effect.settle({ ...base, response });
+      }
       return isPlainObject(response) ? mergeObject(data, response) : data;
 
     case 'insert': {
       if (!ctx.tempId) return data;
-      const settled = effect.from ? effect.from(response) : response;
+      const settled = effect.settle ? effect.settle(response) : response;
       const serverId = readId(settled);
       const next = updateItem(data, effect.field, item => readId(item) === ctx.tempId, () => settled);
       if (serverId && serverId !== ctx.tempId) ctx.onSettle?.(ctx.tempId, serverId);
-      getRowStore(ctx.client).clear(ctx.queryKey, ctx.tempId);
       return next;
     }
 
     case 'update': {
-      if (ctx.rowId) getRowStore(ctx.client).clear(ctx.queryKey, ctx.rowId);
-      if (!isPlainObject(response)) return data;
+      const patch = effect.settle
+        ? effect.settle({ ...base, response })
+        : isPlainObject(response)
+          ? response
+          : undefined;
+      if (patch === undefined) return data;
       return updateItem(data, effect.field, item => readId(item) === ctx.rowId, item =>
-        mergeObject(item, response),
+        mergeObject(item, patch),
       );
     }
 
     case 'remove':
-      if (ctx.rowId) getRowStore(ctx.client).clear(ctx.queryKey, ctx.rowId);
       return data;
 
     case 'removeQuery':
       return data;
   }
+}
+
+function findItemByRowId(data: unknown, effect: Effect, rowId: string): unknown {
+  if (effect.kind !== 'update' && effect.kind !== 'object') return undefined;
+  if (effect.kind === 'object') return undefined;
+  return findItem(data, effect.field, item => readId(item) === rowId);
 }
 
 export type RollbackCtx = ApplyCtx & {
@@ -142,20 +160,18 @@ export type RollbackCtx = ApplyCtx & {
   tempId?: string;
 };
 
-/** Revert an optimistic update on failure. Id-targeted so it is safe under concurrency. */
+/** Revert a draft update on failure. Id-targeted so it is safe under concurrency. */
 export function rollback(effect: Effect, current: unknown, input: unknown, ctx: RollbackCtx): unknown {
   switch (effect.kind) {
     case 'object':
       return ctx.previous;
 
     case 'insert': {
-      if (ctx.tempId) getRowStore(ctx.client).clear(ctx.queryKey, ctx.tempId);
       if (!ctx.tempId) return current;
       return removeItem(current, effect.field, item => readId(item) === ctx.tempId);
     }
 
     case 'update': {
-      if (ctx.rowId) getRowStore(ctx.client).clear(ctx.queryKey, ctx.rowId);
       const prevItem = findItem(ctx.previous, effect.field, item => readId(item) === ctx.rowId);
       if (prevItem === undefined) return current;
       return updateItem(current, effect.field, item => readId(item) === ctx.rowId, () => prevItem);
@@ -173,13 +189,4 @@ export function rollback(effect: Effect, current: unknown, input: unknown, ctx: 
     case 'removeQuery':
       return current;
   }
-}
-
-/** Whether this effect keeps a failed row in place (with retry) instead of rolling back. */
-export function keepsOnFail(effect: Effect, rowId: string | undefined): boolean {
-  return (
-    (effect.kind === 'insert' || effect.kind === 'update')
-    && effect.keepOnFail
-    && rowId !== undefined
-  );
 }

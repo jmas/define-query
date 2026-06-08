@@ -115,6 +115,15 @@ export const demoApi = {
     });
   },
 
+  getComment(postId: string, commentId: string): Promise<Comment> {
+    return simulate(() => {
+      maybeThrowCommentChaos('query');
+      const comment = db.getComment(postId, commentId);
+      if (!comment) throw fail.validation({ text: ['Comment not found'] });
+      return comment;
+    });
+  },
+
   addComment(postId: string, text: string): Promise<{ comment: Comment }> {
     return simulate(() => {
       maybeThrowCommentChaos('add');
@@ -137,10 +146,13 @@ export const demoApi = {
     });
   },
 
-  deleteComment(postId: string, commentId: string): Promise<void> {
+  deleteComment(postId: string, commentId: string): Promise<{ comment: Comment }> {
     return simulate(() => {
       maybeThrowCommentChaos('remove');
       if (!db.removeComment(postId, commentId)) throw new Error('Comment not found');
+      const comment = db.getComment(postId, commentId);
+      if (!comment) throw new Error('Comment not found');
+      return { comment };
     });
   },
 

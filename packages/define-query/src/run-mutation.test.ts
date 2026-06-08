@@ -2,8 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 import { defineMutation } from './define-mutation';
 import { defineQuery } from './define-query';
-import { fail, RowFailure } from './errors';
-import { getRowStore } from './client-state';
+import { fail } from './errors';
 import { getQueryKey } from './query-key';
 
 type Post = { id: string; title: string; commentCount: number };
@@ -17,11 +16,14 @@ const commentsQuery = defineQuery({
   key: (postId: string) => ['post', postId, 'comments'],
   fetch: async (): Promise<{ items: Comment[] }> => ({ items: [] }),
 });
+const commentQuery = defineQuery({
+  key: (params: { postId: string; commentId: string }) =>
+    ['post', params.postId, 'comment', params.commentId] as const,
+  fetch: async (): Promise<Comment> => ({ id: 'c1', text: 'x' }),
+});
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
-// `mutationFn` is typed for TanStack's (variables, context) call; invoke it with
-// the input and a minimal context carrying the active client.
 const call = (
   client: QueryClient,
   options: { mutationFn?: unknown },
@@ -35,10 +37,10 @@ describe('object mutation', () => {
   const rename = defineMutation(postQuery, {
     name: 'rename',
     request: async (id: string, title: string) => ({ id, title }),
-    optimistic: (post, title) => ({ ...post, title }),
+    draft: ({ data, input }) => ({ ...data, title: input }),
   });
 
-  it('applies optimistically then settles with the response', async () => {
+  it('applies draft then settles with the response', async () => {
     const client = new QueryClient();
     const key = getQueryKey(postQuery, 'p1');
     client.setQueryData(key, { id: 'p1', title: 'old', commentCount: 2 });
@@ -59,10 +61,11 @@ describe('object mutation', () => {
 
     const failing = defineMutation(postQuery, {
       name: 'rename',
-      request: async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      request: async (_id: string, _title: string) => {
         throw fail.network('offline');
       },
-      optimistic: (post, title: string) => ({ ...post, title }),
+      draft: ({ data, input }) => ({ ...data, title: input }),
     });
 
     await expect(call(client, failing('p1'), 'new')).rejects.toThrow();
@@ -75,10 +78,15 @@ describe('insert mutation', () => {
     name: 'add',
     request: async (_postId: string, text: string) => ({ comment: { id: 'srv1', text } }),
     insert: 'items',
-    draft: (text, id): Comment => ({ id, text }),
-    from: response => response.comment,
-    keepOnFail: true,
-    sync: on => [on(postQuery).bump('commentCount', 1)],
+    draft: ({ input, tempId }): Comment => ({ id: tempId!, text: input }),
+    settle: response => response.comment,
+    sync: on => [
+      on(commentQuery).setEach('items', {
+        params: (event, item) => ({ postId: event.params, commentId: item.id }),
+        set: item => item,
+      }),
+      on(postQuery).bump('commentCount', 1),
+    ],
   });
 
   it('inserts a temp row, reconciles the server id, and bumps the sibling', async () => {
@@ -89,47 +97,43 @@ describe('insert mutation', () => {
     client.setQueryData(postKey, { id: 'p1', title: 'T', commentCount: 0 });
 
     const promise = call(client, addComment('p1'), 'hello');
-    const optimistic = client.getQueryData<{ items: Comment[] }>(commentsKey)!;
-    expect(optimistic.items).toHaveLength(1);
-    expect(getRowStore(client).statusOf(commentsKey, optimistic.items[0].id)).toBe('pending');
+    const drafted = client.getQueryData<{ items: Comment[] }>(commentsKey)!;
+    expect(drafted.items).toHaveLength(1);
+    const tempId = drafted.items[0].id;
+    expect(client.getQueryData(getQueryKey(commentQuery, { postId: 'p1', commentId: tempId }))).toEqual({
+      id: tempId,
+      text: 'hello',
+    });
 
     await promise;
     const settled = client.getQueryData<{ items: Comment[] }>(commentsKey)!;
     expect(settled.items[0].id).toBe('srv1');
     expect(client.getQueryData<Post>(postKey)?.commentCount).toBe(1);
+    expect(client.getQueryData(getQueryKey(commentQuery, { postId: 'p1', commentId: 'srv1' }))).toEqual({
+      id: 'srv1',
+      text: 'hello',
+    });
   });
 
-  it('keeps a failed row with a working retry', async () => {
+  it('rolls back the temp row when the request fails', async () => {
     const client = new QueryClient();
     const commentsKey = getQueryKey(commentsQuery, 'p1');
     client.setQueryData(commentsKey, { items: [] });
     client.setQueryData(getQueryKey(postQuery, 'p1'), { id: 'p1', title: 'T', commentCount: 0 });
 
-    let attempt = 0;
     const flaky = defineMutation(commentsQuery, {
       name: 'add',
-      request: async (_postId: string, text: string) => {
-        attempt += 1;
-        if (attempt === 1) throw fail.network('offline');
-        return { comment: { id: 'srv1', text } };
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      request: async (_postId: string, _text: string): Promise<{ comment: Comment }> => {
+        throw fail.network('offline');
       },
       insert: 'items',
-      draft: (text, id): Comment => ({ id, text }),
-      from: response => response.comment,
-      keepOnFail: true,
+      draft: ({ input, tempId }): Comment => ({ id: tempId!, text: input }),
+      settle: response => response.comment,
     });
 
-    await expect(call(client, flaky('p1'), 'hello')).rejects.toBeInstanceOf(RowFailure);
-    const items = client.getQueryData<{ items: Comment[] }>(commentsKey)!.items;
-    const rowId = items[0].id;
-    const meta = getRowStore(client).get(commentsKey, rowId);
-    expect(meta?.status).toBe('failed');
-    expect(meta?.message).toBe('offline');
-
-    await meta!.retry!();
-    const settled = client.getQueryData<{ items: Comment[] }>(commentsKey)!;
-    expect(settled.items[0].id).toBe('srv1');
-    expect(getRowStore(client).statusOf(commentsKey, 'srv1')).toBe('ok');
+    await expect(call(client, flaky('p1'), 'hello')).rejects.toThrow();
+    expect(client.getQueryData<{ items: Comment[] }>(commentsKey)?.items).toHaveLength(0);
   });
 });
 
@@ -175,8 +179,7 @@ describe('validation', () => {
       if (!text.trim()) throw fail.validation({ text: 'Required' });
     },
     insert: 'items',
-    draft: (text, id): Comment => ({ id, text }),
-    keepOnFail: true,
+    draft: ({ input, tempId }): Comment => ({ id: tempId!, text: input }),
   });
 
   it('rejects before touching the cache when validate throws', async () => {
@@ -185,7 +188,8 @@ describe('validation', () => {
     client.setQueryData(key, { items: [] });
 
     await expect(call(client, create('p1'), '   ')).rejects.toMatchObject({
-      name: 'ValidationFailure',
+      name: 'DefineQueryMutationError',
+      kind: 'validation',
     });
     expect(client.getQueryData<{ items: Comment[] }>(key)?.items).toHaveLength(0);
   });

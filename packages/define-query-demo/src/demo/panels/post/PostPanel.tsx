@@ -1,10 +1,9 @@
 import { useIsFetching } from '@tanstack/react-query';
-import { Component, Suspense, type ReactNode } from 'react';
-import { getQueryKey } from 'define-query';
+import { Component, Suspense, memo, type ReactNode } from 'react';
+import { postQuery } from '../../queries';
 import { FeatureTag } from '../../components/FeatureTag';
 import { RefetchIndicator } from '../../components/RefetchIndicator';
 import { PostPanelSkeleton } from '../../components/Skeleton';
-import { postQuery } from '../../queries';
 import {
     emptyCls,
     errorCls,
@@ -15,6 +14,7 @@ import {
     panelTitleCls,
     postSuspenseContentCls,
 } from '../../styles';
+import { CommentsPanel } from './CommentsPanel';
 import { PostHeader } from './PostHeader';
 
 type Props = {
@@ -65,9 +65,9 @@ class PostPanelErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundary
   }
 }
 
-export function PostPanel({ postId, onClose }: Props) {
+export const PostPanel = memo(function PostPanel({ postId, onClose }: Props) {
   const fetchingCount = useIsFetching({
-    queryKey: postId ? getQueryKey(postQuery, postId) : ['post-panel-idle'],
+    queryKey: postId ? postQuery.key(postId) : ['post-panel-idle'],
     exact: true,
   });
   const isPostFetching = postId !== null && fetchingCount > 0;
@@ -94,6 +94,7 @@ export function PostPanel({ postId, onClose }: Props) {
           <PostPanelErrorBoundary postId={postId} onClose={onClose}>
             <Suspense fallback={<PostPanelSkeleton />}>
               <PostHeader postId={postId} onDeleted={onClose} />
+              <CommentsPanel postId={postId} />
             </Suspense>
           </PostPanelErrorBoundary>
         )
@@ -104,4 +105,4 @@ export function PostPanel({ postId, onClose }: Props) {
         )}
     </section>
   );
-}
+});

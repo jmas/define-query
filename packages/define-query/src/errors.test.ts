@@ -1,88 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import {
-  classify,
-  errorText,
+  DefineQueryMutationError,
   fail,
-  fieldError,
-  generalErrorText,
-  isRowFailure,
-  isValidationError,
-  rowFailure,
-  rowFailureId,
-  RowFailure,
+  isMutationError,
+  toDefineQueryMutationError,
 } from './errors';
 
-describe('fail + classify', () => {
-  it('classifies validation failures with fields', () => {
-    const error = fail.validation({ title: ['Required'], body: 'Too short' });
-    const classified = classify(error);
-    expect(classified).toEqual({
-      kind: 'validation',
-      fields: { title: ['Required'], body: 'Too short' },
-    });
+describe('fail + DefineQueryMutationError', () => {
+  it('normalizes validation failures with field()', () => {
+    const error = toDefineQueryMutationError(fail.validation({ title: ['Required'], body: 'Too short' }));
+    expect(isMutationError(error)).toBe(true);
+    expect(error.kind).toBe('validation');
+    expect(error.field('title')).toBe('Required');
+    expect(error.field('body')).toBe('Too short');
+    expect(error.banner()).toBeNull();
   });
 
-  it('classifies network failures', () => {
-    expect(classify(fail.network('offline'))).toEqual({ kind: 'network', message: 'offline' });
-    expect(classify(new TypeError('Failed to fetch')).kind).toBe('network');
-    expect(classify(new TypeError('Load failed')).kind).toBe('network');
+  it('normalizes network failures with banner()', () => {
+    const error = toDefineQueryMutationError(fail.network('offline'));
+    expect(error.kind).toBe('network');
+    expect(error.banner()).toBe('offline');
+    expect(error.field('title')).toBeNull();
+  });
+
+  it('normalizes server failures', () => {
+    const error = toDefineQueryMutationError(fail.server('Internal error'));
+    expect(error.kind).toBe('server');
+    expect(error.banner()).toBe('Internal error');
   });
 
   it('does not mislabel a non-fetch TypeError as network', () => {
     const bug = new TypeError("Cannot read properties of undefined (reading 'comment')");
-    expect(classify(bug)).toEqual({ kind: 'error', message: bug.message });
+    const error = toDefineQueryMutationError(bug);
+    expect(error.kind).toBe('error');
+    expect(error.banner()).toBe(bug.message);
   });
 
-  it('classifies generic errors and non-errors', () => {
-    expect(classify(new Error('boom'))).toEqual({ kind: 'error', message: 'boom' });
-    expect(classify('weird')).toEqual({ kind: 'error', message: 'weird' });
-  });
-});
-
-describe('UI helpers', () => {
-  it('fieldError reads the first message for a field', () => {
-    const error = fail.validation({ title: ['First', 'Second'] });
-    expect(fieldError(error, 'title')).toBe('First');
-    expect(fieldError(error, 'missing')).toBeNull();
-    expect(fieldError(null, 'title')).toBeNull();
+  it('normalizes generic errors and non-errors', () => {
+    expect(toDefineQueryMutationError(new Error('boom')).banner()).toBe('boom');
+    expect(toDefineQueryMutationError('weird').banner()).toBe('weird');
   });
 
-  it('errorText surfaces network/server messages and first validation field', () => {
-    expect(errorText(fail.network('offline'))).toBe('offline');
-    expect(errorText(fail.validation({ title: 'Required' }))).toBe('Required');
-    expect(errorText(null)).toBeNull();
-  });
-
-  it('isValidationError discriminates', () => {
-    expect(isValidationError(fail.validation({ a: 'x' }))).toBe(true);
-    expect(isValidationError(fail.network())).toBe(false);
-    expect(isValidationError(null)).toBe(false);
-  });
-});
-
-
-describe('RowFailure', () => {
-  it('classifies through the wrapped cause', () => {
-    const wrapped = rowFailure(fail.network('offline'), 'tmp_1', 'add');
-    expect(wrapped).toBeInstanceOf(RowFailure);
-    expect(classify(wrapped)).toEqual({ kind: 'network', message: 'offline' });
-    expect(wrapped.rowId).toBe('tmp_1');
-    expect(wrapped.mutation).toBe('add');
-  });
-
-  it('isRowFailure and rowFailureId', () => {
-    const wrapped = rowFailure(fail.network('offline'), 'tmp_1', 'add');
-    expect(isRowFailure(wrapped)).toBe(true);
-    expect(isRowFailure(fail.network())).toBe(false);
-    expect(rowFailureId(wrapped)).toBe('tmp_1');
-    expect(rowFailureId(null)).toBeNull();
-  });
-
-  it('generalErrorText ignores row and validation failures', () => {
-    const row = rowFailure(fail.network('offline'), 'tmp_1', 'add');
-    expect(generalErrorText(row)).toBeNull();
-    expect(generalErrorText(fail.validation({ title: 'Required' }))).toBeNull();
-    expect(generalErrorText(fail.network('offline'))).toBe('offline');
-    expect(generalErrorText(null)).toBeNull();
+  it('is idempotent for DefineQueryMutationError', () => {
+    const original = new DefineQueryMutationError({ kind: 'network', message: 'offline' });
+    expect(toDefineQueryMutationError(original)).toBe(original);
   });
 });

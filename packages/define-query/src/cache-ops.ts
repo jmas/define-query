@@ -1,3 +1,4 @@
+import type { SyncDataShape, SyncFieldItem, SyncListFieldOf } from './sync-list-types';
 import { isInfiniteData, isPlainObject, readId } from './util';
 
 export type ListPosition = 'start' | 'end';
@@ -35,15 +36,25 @@ export function mapField<T>(data: T, field: string, mapItems: (items: unknown[])
   return data;
 }
 
+function bootstrapInfinitePage(field: string, item: unknown): Record<string, unknown> {
+  return { [field]: [item] };
+}
+
 export function insertItem<T>(data: T, field: string, item: unknown, position: ListPosition): T {
   if (isInfiniteData(data)) {
-    if (data.pages.length === 0) return data;
+    if (data.pages.length === 0) {
+      return {
+        ...data,
+        pages: [bootstrapInfinitePage(field, item)],
+        pageParams: data.pageParams ?? [],
+      } as T;
+    }
     const pageIndex = position === 'start' ? 0 : data.pages.length - 1;
     return {
       ...data,
       pages: data.pages.map((page, index) => {
-        if (index !== pageIndex || !isPlainObject(page) || !Array.isArray(page[field])) return page;
-        const items = page[field] as unknown[];
+        if (index !== pageIndex || !isPlainObject(page)) return page;
+        const items = Array.isArray(page[field]) ? (page[field] as unknown[]) : [];
         return {
           ...page,
           [field]: position === 'start' ? [item, ...items] : [...items, item],
@@ -87,9 +98,20 @@ export function findItem(data: unknown, field: string, match: (item: unknown) =>
 }
 
 /** Flatten a list field across all pages of an infinite query (or a plain object). */
-export function flattenInfiniteField<TItem>(data: unknown, field: string): TItem[] {
+export function flattenInfiniteField<TData, K extends SyncListFieldOf<SyncDataShape<TData>>>(
+  data: TData,
+  field: K,
+): SyncFieldItem<SyncDataShape<TData>, K>[];
+
+/** @deprecated Pass typed query data — generic item override is discouraged. */
+export function flattenInfiniteField<TItem>(data: unknown, field: string): TItem[];
+
+export function flattenInfiniteField<TData, K extends string>(
+  data: TData,
+  field: K,
+): unknown[] {
   if (isInfiniteData(data)) {
-    return data.pages.flatMap(page => getArray(page, field) as TItem[]);
+    return data.pages.flatMap(page => getArray(page, field));
   }
-  return getArray(data, field) as TItem[];
+  return getArray(data, field);
 }

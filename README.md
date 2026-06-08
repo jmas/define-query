@@ -8,7 +8,7 @@ npm workspaces for [**define-query**](packages/define-query/) — a thin helper 
 
 | Package | Description |
 |---------|-------------|
-| [`define-query`](packages/define-query/) | Publishable library. Factories for native `queryOptions` / `mutationOptions`, optimistic updates, sync, row state. |
+| [`define-query`](packages/define-query/) | Publishable library. Factories for native `queryOptions` / `mutationOptions`, draft updates, sync. |
 | [`define-query-demo`](packages/define-query-demo/) | Private Vite + React app showcasing timeline, posts, and comments. |
 
 ## Commands
