@@ -5,7 +5,7 @@ import { commentQuery, postCommentsQuery, postQuery, timelineInfiniteQuery } fro
 
 export { commentQuery, postCommentsQuery } from './queries';
 
-export const addCommentMutation = defineMutation(postCommentsQuery, {
+export const addCommentMutation = defineMutation({ query: postCommentsQuery,
   name: 'add',
   request: (postId: string, text: string) => demoApi.addComment(postId, text),
   insert: 'items',
@@ -27,7 +27,7 @@ export const addCommentMutation = defineMutation(postCommentsQuery, {
   ],
 });
 
-export const editCommentMutation = defineMutation(postCommentsQuery, {
+export const editCommentMutation = defineMutation({ query: postCommentsQuery,
   name: 'edit',
   remapInput: ['commentId'],
   request: (postId: string, { commentId, text }: { commentId: string; text: string }) =>
@@ -37,7 +37,7 @@ export const editCommentMutation = defineMutation(postCommentsQuery, {
   draft: ({ input }) => ({ text: input.text }),
 });
 
-export const removeCommentMutation = defineMutation(postCommentsQuery, {
+export const removeCommentMutation = defineMutation({ query: postCommentsQuery,
   name: 'remove',
   remapInput: ['commentId'],
   request: (postId: string, commentId: string) => demoApi.deleteComment(postId, commentId),

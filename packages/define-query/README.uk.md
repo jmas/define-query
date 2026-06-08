@@ -16,7 +16,7 @@
 ```
 defineQuery(config)            →  (params) => queryOptions(...)
 defineInfiniteQuery(config)    →  (params) => infiniteQueryOptions(...)
-defineMutation(query, config)  →  (params) => mutationOptions(...)
+defineMutation(config)           →  (params) => mutationOptions(...)
 ```
 
 Уся поверхня TanStack лишається твоєю (`isPending`, `error`, `fetchStatus`, `mutate`, `mutateAsync`, …). Ліба лише будує об'єкти опцій для рідних хуків.
@@ -29,7 +29,7 @@ defineMutation(query, config)  →  (params) => mutationOptions(...)
 | **Sync** | Mutation sync після успішного `request`; query fetch sync після network fetch |
 | **UI state** | Рідний `useMutation` і `useQuery` (draft у кеші) |
 
-Перший аргумент `defineMutation` — **який кеш оновлює мутація**, а не обов'язково endpoint API. `addComment` → `postCommentsQuery`, `renamePost` → `postQuery` тощо.
+Опційне поле `query` у `defineMutation` — **який кеш оновлює мутація**, а не обов'язково endpoint API. `addComment` → `postCommentsQuery`, `renamePost` → `postQuery` тощо. Без `query` — тонка мутація (`request` + опційний `sync`).
 
 ---
 
@@ -63,7 +63,8 @@ const postQuery = defineQuery({
   options: { staleTime: 30_000 },
 });
 
-const renamePost = defineMutation(postQuery, {
+const renamePost = defineMutation({
+  query: postQuery,
   name: 'rename',
   request: (id: string, title: string) => api.patchPost(id, { title }),
   draft: ({ data, input }) => ({ ...data, title: input }),
@@ -133,7 +134,24 @@ const items = flattenInfiniteField(timeline.data, 'items');
 
 ## Мутації
 
-Обов'язковий унікальний **`name`**. Обирай **одну** draft-форму.
+`defineMutation(config)` повертає `(params) => mutationOptions`. Обов'язковий унікальний **`name`**. Обирай **одну** draft-форму, коли є `query`.
+
+| `query` | `mutationKey` |
+|---------|----------------|
+| заданий | `[...queryKey, name]` |
+| відсутній | `[name]` або `[name, params]` |
+
+`query` **обов'язковий** для draft-форм. Для лише `request` + `sync` — можна опустити.
+
+### Тонка мутація (без `query`)
+
+```tsx
+const reportSpam = defineMutation({
+  name: 'reportSpam',
+  request: (postId: string, reason: string) => api.report(postId, reason),
+  sync: (on) => [on(postQuery).invalidate({ params: ({ params }) => params })],
+});
+```
 
 ### `DraftCtx` — єдиний API для draft
 
@@ -173,6 +191,87 @@ draft: ({ input }) => ({ text: input.text }),
 ### Конкурентність
 
 Паралельні мутації на одному списку безпечні: rollback по `rowId` / `tempId`. Два edit одного рядка — **останній успішний response виграє** при settle.
+
+---
+
+## Валідація
+
+`validate(input)` виконується **до** draft — `fail.validation(...)` відхиляє мутацію без змін у кеші. Той самий `fail.validation(...)` можна кинути з `request` (наприклад, 422 від API); у разі будь-якої помилки draft відкочується.
+
+Кожне поле — `string` або `string[]`; `.field(key)` повертає перше повідомлення.
+
+### Клієнтська — `validate`
+
+```tsx
+const createPost = defineMutation({
+  query: timelineQuery,
+  name: 'create',
+  request: (_params, { title, body }) => api.createPost({ title, body }),
+  validate: ({ title, body }) => {
+    if (!title.trim()) throw fail.validation({ title: ['Заголовок не може бути порожнім'] });
+    if (!body.trim()) throw fail.validation({ body: ['Текст не може бути порожнім'] });
+  },
+  prepend: 'items',
+  draft: ({ input, tempId }) => ({ id: tempId!, title: input.title, body: input.body }),
+});
+```
+
+Працює і без `query` — для тонких мутацій, де потрібні лише перевірки форми:
+
+```tsx
+const reportSpam = defineMutation({
+  name: 'reportSpam',
+  validate: reason => {
+    if (!reason.trim()) throw fail.validation({ reason: 'Обовʼязкове поле' });
+  },
+  request: (postId, reason) => api.report(postId, reason),
+});
+```
+
+### Серверна — `request`
+
+```tsx
+request: async (postId, text) => {
+  const res = await api.addComment(postId, text);
+  if (res.error) throw fail.validation(res.error); // напр. { text: ['Занадто коротко'] }
+  return res;
+},
+```
+
+### UI — поле vs banner
+
+```tsx
+function CreateForm({ params }: { params: { q: string } }) {
+  const create = useMutation(createPost(params));
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    create.reset(); // скинути попередні помилки
+    create.mutate({ title, body });
+  }
+
+  const titleError = create.error?.field('title'); // лише validation
+  const bodyError = create.error?.field('body');
+  const banner = create.error?.banner(); // network / server — null для validation
+
+  return (
+    <form onSubmit={submit}>
+      {titleError && <span>{titleError}</span>}
+      {bodyError && <span>{bodyError}</span>}
+      {banner && <span>{banner}</span>}
+    </form>
+  );
+}
+```
+
+Для одного рядка вводу — `field('text')` і `banner()` покривають validation і мережеві помилки:
+
+```tsx
+<>
+  {add.error?.field('text') && <span>{add.error.field('text')}</span>}
+  {add.error?.banner() && <span>{add.error.banner()}</span>}
+</>
+```
 
 ---
 

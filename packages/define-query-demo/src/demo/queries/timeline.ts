@@ -5,7 +5,7 @@ import { postCommentsQuery, postQuery, timelineInfiniteQuery } from './queries';
 
 export { timelineInfiniteQuery } from './queries';
 
-export const createTimelinePostMutation = defineMutation(timelineInfiniteQuery, {
+export const createTimelinePostMutation = defineMutation({ query: timelineInfiniteQuery,
   name: 'create',
   request: (_params: { q: string }, { title, body }: { title: string; body: string }) =>
     demoApi.createPost({ title, body }),

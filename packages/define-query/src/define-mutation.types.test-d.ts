@@ -27,7 +27,7 @@ const timelineQuery = defineQuery({
 });
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const add = defineMutation(commentsQuery, {
+const add = defineMutation({ query: commentsQuery,
   name: 'add',
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   request: async (_postId: string, _text: string) => ({ comment: { id: 'c1', text: 'a' } }),
@@ -65,7 +65,7 @@ type AddInput = NonNullable<ReturnType<typeof add>['mutationFn']> extends (
 assertType<string>({} as AddInput);
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const removePost = defineMutation(postQuery, {
+const removePost = defineMutation({ query: postQuery,
   name: 'remove',
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   request: async (_id: string) => undefined,
@@ -80,7 +80,7 @@ type RemoveInput = NonNullable<ReturnType<typeof removePost>['mutationFn']> exte
   : never;
 assertType<void>({} as RemoveInput);
 
-defineMutation(commentsQuery, {
+defineMutation({ query: commentsQuery,
   name: 'bad',
   request: async () => ({ ok: true }),
   insert: 'items',
@@ -89,7 +89,7 @@ defineMutation(commentsQuery, {
   draft: () => ({ id: 'x', text: 'y' }),
 });
 
-defineMutation(commentsQuery, {
+defineMutation({ query: commentsQuery,
   name: 'bad-field',
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   request: async (_postId: string, _text: string) => ({ comment: { id: 'c1', text: 'a' } }),
@@ -99,7 +99,7 @@ defineMutation(commentsQuery, {
   draft: ({ input, tempId }) => ({ id: tempId!, text: input }),
 });
 
-defineMutation(postQuery, {
+defineMutation({ query: postQuery,
   name: 'bad-arity',
   // @ts-expect-error — request must be (params) or (params, input), not three arguments
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -107,5 +107,32 @@ defineMutation(postQuery, {
     id: 'p1',
     title: 't',
     commentCount: 0,
+  }),
+});
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const reportSpam = defineMutation({
+  name: 'reportSpam',
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  request: async (_postId: string, _reason: string) => ({ ok: true }),
+  sync: on => [on(postQuery).invalidate({ params: ({ params }) => params })],
+});
+
+type ReportInput = NonNullable<ReturnType<typeof reportSpam>['mutationFn']> extends (
+  input: infer I,
+  ...args: unknown[]
+) => unknown
+  ? I
+  : never;
+assertType<string>({} as ReportInput);
+
+// @ts-expect-error — draft forms require query
+defineMutation({
+  name: 'bad-no-query',
+  request: async (_postId: string, text: string) => ({ id: '1', text }),
+  insert: 'items',
+  draft: ({ input, tempId }: { input: string; tempId?: string }) => ({
+    id: tempId!,
+    text: input,
   }),
 });

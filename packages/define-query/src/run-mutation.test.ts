@@ -34,7 +34,7 @@ const call = (
   });
 
 describe('object mutation', () => {
-  const rename = defineMutation(postQuery, {
+  const rename = defineMutation({ query: postQuery,
     name: 'rename',
     request: async (id: string, title: string) => ({ id, title }),
     draft: ({ data, input }) => ({ ...data, title: input }),
@@ -59,7 +59,7 @@ describe('object mutation', () => {
     const previous = { id: 'p1', title: 'old', commentCount: 2 };
     client.setQueryData(key, previous);
 
-    const failing = defineMutation(postQuery, {
+    const failing = defineMutation({ query: postQuery,
       name: 'rename',
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       request: async (_id: string, _title: string) => {
@@ -74,7 +74,7 @@ describe('object mutation', () => {
 });
 
 describe('insert mutation', () => {
-  const addComment = defineMutation(commentsQuery, {
+  const addComment = defineMutation({ query: commentsQuery,
     name: 'add',
     request: async (_postId: string, text: string) => ({ comment: { id: 'srv1', text } }),
     insert: 'items',
@@ -121,7 +121,7 @@ describe('insert mutation', () => {
     client.setQueryData(commentsKey, { items: [] });
     client.setQueryData(getQueryKey(postQuery, 'p1'), { id: 'p1', title: 'T', commentCount: 0 });
 
-    const flaky = defineMutation(commentsQuery, {
+    const flaky = defineMutation({ query: commentsQuery,
       name: 'add',
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       request: async (_postId: string, _text: string): Promise<{ comment: Comment }> => {
@@ -138,7 +138,7 @@ describe('insert mutation', () => {
 });
 
 describe('remove mutations', () => {
-  const removeComment = defineMutation(commentsQuery, {
+  const removeComment = defineMutation({ query: commentsQuery,
     name: 'remove',
     request: async (postId: string, commentId: string) => ({ ok: true, postId, commentId }),
     removeField: 'items',
@@ -159,7 +159,7 @@ describe('remove mutations', () => {
     const key = getQueryKey(postQuery, 'p1');
     client.setQueryData(key, { id: 'p1', title: 'T', commentCount: 0 });
 
-    const removePost = defineMutation(postQuery, {
+    const removePost = defineMutation({ query: postQuery,
       name: 'removePost',
       request: async (id: string) => ({ ok: true, id }),
       removeQuery: true,
@@ -172,7 +172,7 @@ describe('remove mutations', () => {
 });
 
 describe('validation', () => {
-  const create = defineMutation(commentsQuery, {
+  const create = defineMutation({ query: commentsQuery,
     name: 'add',
     request: async (_postId: string, text: string) => ({ comment: { id: 'srv1', text } }),
     validate: text => {

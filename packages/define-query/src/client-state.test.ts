@@ -47,7 +47,7 @@ describe('lifecycle cleanup', () => {
     client.setQueryData(key, { items: [] });
 
     let capturedId: string | undefined;
-    const addComment = defineMutation(commentsQuery, {
+    const addComment = defineMutation({ query: commentsQuery,
       name: 'add',
       request: async (_postId: string, text: string) => ({ comment: { id: 'srv1', text } }),
       insert: 'items',
@@ -60,7 +60,7 @@ describe('lifecycle cleanup', () => {
     expect(tempId).toBeDefined();
     expect(getSettledIds(client).size).toBe(1);
 
-    const removeComment = defineMutation(commentsQuery, {
+    const removeComment = defineMutation({ query: commentsQuery,
       name: 'remove',
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       request: async (_postId: string, _commentId: string) => ({ ok: true }),
@@ -71,7 +71,7 @@ describe('lifecycle cleanup', () => {
     await call(client, removeComment('p1'), 'srv1');
     expect(getSettledIds(client).size).toBe(0);
 
-    const editComment = defineMutation(commentsQuery, {
+    const editComment = defineMutation({ query: commentsQuery,
       name: 'edit',
       request: async (_postId: string, input: { commentId: string }) => {
         capturedId = input.commentId;
@@ -93,7 +93,7 @@ describe('lifecycle cleanup', () => {
     const key = getQueryKey(postQuery, 'p1');
     client.setQueryData(key, { id: 'p1', title: 'T', commentCount: 0 });
 
-    const removePost = defineMutation(postQuery, {
+    const removePost = defineMutation({ query: postQuery,
       name: 'removePost',
       request: async () => ({ ok: true }),
       removeQuery: true,
@@ -113,7 +113,7 @@ describe('lifecycle cleanup', () => {
     const key = getQueryKey(commentsQuery, 'p1');
     client.setQueryData(key, { items: [] });
 
-    const noopMutation = defineMutation(commentsQuery, {
+    const noopMutation = defineMutation({ query: commentsQuery,
       name: 'noop',
       request: async () => ({ ok: true }),
       draft: ({ data }) => data,

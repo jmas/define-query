@@ -49,7 +49,7 @@ describe('overlapping mutations on one list query', () => {
     client.setQueryData(commentsKey, { items: [{ id: 'c1', text: 'a' }] });
 
     const server = controllable<Comment>();
-    const editComment = defineMutation(commentsQuery, {
+    const editComment = defineMutation({ query: commentsQuery,
       name: 'edit',
       request: (postId: string, input: { commentId: string; text: string }) =>
         server.fn(postId, input),
@@ -76,7 +76,7 @@ describe('overlapping mutations on one list query', () => {
     client.setQueryData(commentsKey, { items: [{ id: 'c1', text: 'a' }] });
 
     const removeServer = controllable<{ ok: true }>();
-    const removeComment = defineMutation(commentsQuery, {
+    const removeComment = defineMutation({ query: commentsQuery,
       name: 'remove',
       request: (postId: string, commentId: string) => removeServer.fn(postId, commentId),
       removeField: 'items',
@@ -84,7 +84,7 @@ describe('overlapping mutations on one list query', () => {
     });
 
     const addServer = controllable<{ comment: Comment }>();
-    const addComment = defineMutation(commentsQuery, {
+    const addComment = defineMutation({ query: commentsQuery,
       name: 'add',
       request: (postId: string, text: string) => addServer.fn(postId, text),
       insert: 'items',
@@ -111,7 +111,7 @@ describe('overlapping mutations on one list query', () => {
     client.setQueryData(commentsKey, { items: [] });
 
     const server = controllable<{ comment: Comment }>();
-    const addComment = defineMutation(commentsQuery, {
+    const addComment = defineMutation({ query: commentsQuery,
       name: 'add',
       request: (postId: string, text: string) => server.fn(postId, text),
       insert: 'items',

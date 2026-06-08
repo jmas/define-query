@@ -79,6 +79,25 @@ export function buildMutationKey<TParams>(
   return [...getQueryKey(query, params), name];
 }
 
+/** Build a mutation key from `name` only — `[name]` or `[name, params]`. */
+export function buildNameMutationKey<TParams>(
+  name: string,
+  params?: TParams,
+): readonly unknown[] {
+  if (params === undefined) return [name];
+  const normalized = normalizeParams(params);
+  if (isShallowKeyObject(normalized)) {
+    return [name, shallowKeyObject(normalized)];
+  }
+  const value = toKeyValue(normalized);
+  if (value !== undefined) return [name, value];
+  if (typeof normalized === 'object' && normalized !== null) {
+    warnIfParamsCollapsed(normalized);
+    return [name, {}];
+  }
+  return [name, normalized];
+}
+
 /** Stable mutation key (same as `mutation(params).mutationKey`). */
 export function getMutationKey<TParams>(
   mutation: { key: (params: TParams) => readonly unknown[] },

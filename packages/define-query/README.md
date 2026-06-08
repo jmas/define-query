@@ -16,7 +16,7 @@ It does not wrap or replace `useQuery` / `useMutation`. Instead:
 ```
 defineQuery(config)            →  (params) => queryOptions(...)
 defineInfiniteQuery(config)    →  (params) => infiniteQueryOptions(...)
-defineMutation(query, config)  →  (params) => mutationOptions(...)
+defineMutation(config)           →  (params) => mutationOptions(...)
 ```
 
 You keep TanStack's full surface (`isPending`, `error`, `fetchStatus`, `mutate`, `mutateAsync`, …). This library only builds the option objects you pass to the native hooks.
@@ -31,7 +31,7 @@ You keep TanStack's full surface (`isPending`, `error`, `fetchStatus`, `mutate`,
 
 `defineMutation` infers `TInput` from the 2nd `request` argument and `TResponse` from its return type.
 
-The first argument to `defineMutation` is the **query whose cache the mutation updates** — not necessarily the API endpoint. Bind `addComment` to `postCommentsQuery`, `renamePost` to `postQuery`, etc.
+Optional `query` in `defineMutation` config is the **query whose cache the mutation updates** — not necessarily the API endpoint. Bind `addComment` to `postCommentsQuery`, `renamePost` to `postQuery`, etc. Omit `query` for thin mutations (`request` + optional `sync` only).
 
 ---
 
@@ -65,7 +65,8 @@ const postQuery = defineQuery({
   options: { staleTime: 30_000 },
 });
 
-const renamePost = defineMutation(postQuery, {
+const renamePost = defineMutation({
+  query: postQuery,
   name: 'rename',
   request: (id: string, title: string) => api.patchPost(id, { title }),
   draft: ({ data, input }) => ({ ...data, title: input }),
@@ -165,7 +166,24 @@ Refetch / prefetch / invalidate re-run fetch sync. Failed fetches and `initialDa
 
 ## Mutations
 
-`defineMutation(query, config)` returns `(params) => mutationOptions`. Pick **one** draft form. Each mutation requires a unique **`name`**: `[...queryKey, name]`.
+`defineMutation(config)` returns `(params) => mutationOptions`. Pick **one** draft form when using `query`. Each mutation requires a unique **`name`**.
+
+| `query` | `mutationKey` |
+|---------|----------------|
+| set | `[...queryKey, name]` |
+| omitted | `[name]` or `[name, params]` |
+
+`query` is **required** for draft forms (`object`, `insert` / `prepend`, `update`, `removeField`, `removeQuery`). For `request` + `sync` only, omit `query`.
+
+### Thin mutation (no `query`)
+
+```tsx
+const reportSpam = defineMutation({
+  name: 'reportSpam',
+  request: (postId: string, reason: string) => api.report(postId, reason),
+  sync: (on) => [on(postQuery).invalidate({ params: ({ params }) => params })],
+});
+```
 
 ### `DraftCtx` — unified draft API
 
@@ -190,7 +208,8 @@ type DraftCtx<TData, TInput> = {
 ### Object form — merge into a single cached object
 
 ```tsx
-const renamePost = defineMutation(postQuery, {
+const renamePost = defineMutation({
+  query: postQuery,
   name: 'rename',
   request: (id: string, title: string) => api.patchPost(id, { title }),
   draft: ({ data, input }) => ({ ...data, title: input }),
@@ -201,7 +220,8 @@ const renamePost = defineMutation(postQuery, {
 ### Insert / prepend — add a list item
 
 ```tsx
-const addComment = defineMutation(postCommentsQuery, {
+const addComment = defineMutation({
+  query: postCommentsQuery,
   name: 'add',
   request: (postId: string, text: string) => api.addComment(postId, text),
   insert: 'items',
@@ -220,7 +240,8 @@ Temp ids are reconciled on success; `remapInput` (default `['id']`) remaps temp 
 ### Update — patch a matching list item
 
 ```tsx
-const editComment = defineMutation(postCommentsQuery, {
+const editComment = defineMutation({
+  query: postCommentsQuery,
   name: 'edit',
   remapInput: ['commentId'],
   request: (postId: string, { commentId, text }) => api.updateComment(postId, commentId, text),
@@ -233,7 +254,8 @@ const editComment = defineMutation(postCommentsQuery, {
 ### `removeField` — drop a matching list item
 
 ```tsx
-const removeComment = defineMutation(postCommentsQuery, {
+const removeComment = defineMutation({
+  query: postCommentsQuery,
   name: 'remove',
   request: (postId: string, commentId: string) => api.deleteComment(postId, commentId),
   removeField: 'items',
@@ -247,7 +269,8 @@ Removing an un-persisted temp row skips the network request automatically.
 ### `removeQuery` — drop the whole query
 
 ```tsx
-const removePost = defineMutation(postQuery, {
+const removePost = defineMutation({
+  query: postQuery,
   name: 'removePost',
   request: (id: string) => api.deletePost(id),
   removeQuery: true,
@@ -273,11 +296,92 @@ import { useIsMutating } from '@tanstack/react-query';
 const isAdding = useIsMutating({ mutationKey: addComment.key(postId) });
 ```
 
-`validate(input)` runs **before** the draft; throw `fail.validation(...)` to surface a form error without touching the cache.
-
 ### Concurrency
 
 Overlapping mutations on the same list are safe: rollback is **id-targeted** (`rowId` / `tempId`). When two edits of the same row are in flight, the **last successful response wins** on settle.
+
+---
+
+## Validation
+
+`validate(input)` runs **before** the draft — a thrown `fail.validation(...)` rejects the mutation without touching the cache. You can also throw `fail.validation(...)` from `request` (e.g. map a 422 response); the draft is rolled back on any failure.
+
+Each field accepts a `string` or `string[]` (`.field(key)` returns the first message).
+
+### Client-side — `validate`
+
+```tsx
+const createPost = defineMutation({
+  query: timelineQuery,
+  name: 'create',
+  request: (_params, { title, body }) => api.createPost({ title, body }),
+  validate: ({ title, body }) => {
+    if (!title.trim()) throw fail.validation({ title: ['Title cannot be empty'] });
+    if (!body.trim()) throw fail.validation({ body: ['Body cannot be empty'] });
+  },
+  prepend: 'items',
+  draft: ({ input, tempId }) => ({ id: tempId!, title: input.title, body: input.body }),
+});
+```
+
+Works without `query` too — useful for thin mutations that only need form checks:
+
+```tsx
+const reportSpam = defineMutation({
+  name: 'reportSpam',
+  validate: reason => {
+    if (!reason.trim()) throw fail.validation({ reason: 'Required' });
+  },
+  request: (postId, reason) => api.report(postId, reason),
+});
+```
+
+### Server-side — `request`
+
+Map API field errors the same way — rollback still runs if the draft already wrote:
+
+```tsx
+request: async (postId, text) => {
+  const res = await api.addComment(postId, text);
+  if (res.error) throw fail.validation(res.error); // e.g. { text: ['Too short'] }
+  return res;
+},
+```
+
+### UI — per-field vs banner
+
+```tsx
+function CreateForm({ params }: { params: { q: string } }) {
+  const create = useMutation(createPost(params));
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    create.reset(); // clear previous field/banner errors
+    create.mutate({ title, body });
+  }
+
+  const titleError = create.error?.field('title'); // validation only
+  const bodyError = create.error?.field('body');
+  const banner = create.error?.banner(); // network / server — null for validation
+
+  return (
+    <form onSubmit={submit}>
+      {titleError && <span>{titleError}</span>}
+      {bodyError && <span>{bodyError}</span>}
+      {banner && <span>{banner}</span>}
+    </form>
+  );
+}
+```
+
+For a single-string input, `field('text')` and `banner()` cover both validation and transport errors:
+
+```tsx
+<>
+  {add.error?.field('text') && <span>{add.error.field('text')}</span>}
+  {add.error?.banner() && <span>{add.error.banner()}</span>}
+</>
+```
 
 ---
 

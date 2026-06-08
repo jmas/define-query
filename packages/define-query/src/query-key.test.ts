@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildMutationKey,
+  buildNameMutationKey,
   getQueryKey,
   normalizeParams,
   serializeKey,
@@ -78,6 +79,22 @@ describe('buildMutationKey', () => {
     expect(buildMutationKey(query, 'add', { q: 'x' })).toEqual(
       buildMutationKey(query, 'add', { q: 'x' }),
     );
+  });
+});
+
+describe('buildNameMutationKey', () => {
+  it('uses name only when params are omitted', () => {
+    expect(buildNameMutationKey('logout')).toEqual(['logout']);
+    expect(buildNameMutationKey('logout', undefined)).toEqual(['logout']);
+  });
+
+  it('appends scalar params after name', () => {
+    expect(buildNameMutationKey('reportSpam', 'p1')).toEqual(['reportSpam', 'p1']);
+  });
+
+  it('normalizes object params after name', () => {
+    expect(buildNameMutationKey('search', { q: 'hello' })).toEqual(['search', { q: 'hello' }]);
+    expect(buildNameMutationKey('search', { b: 2, a: 1 })).toEqual(['search', { a: 1, b: 2 }]);
   });
 });
 

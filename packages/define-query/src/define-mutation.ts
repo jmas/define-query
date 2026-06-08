@@ -2,7 +2,7 @@ import type { UseMutationOptions } from '@tanstack/react-query';
 import type { MutationQueryRef } from './define-query';
 import { warnDuplicateMutationName } from './dev-warnings';
 import { DefineQueryMutationError, toDefineQueryMutationError } from './errors';
-import { buildMutationKey } from './query-key';
+import { buildMutationKey, buildNameMutationKey, getQueryKey } from './query-key';
 import { runMutation } from './run-mutation';
 import type { OnBuilder, SyncEvent, SyncOp } from './sync';
 import type { ListItem, SyncListFieldOf } from './sync-list-types';
@@ -16,6 +16,16 @@ type QueryParams<Q extends MutationQueryRef> =
 
 type QueryData<Q extends MutationQueryRef> =
   Q extends { readonly __data?: infer D } ? D : never;
+
+/** First `request` argument when no `query` is bound. */
+export type ParamsFromRequest<TRequest> =
+  TRequest extends (params: infer P, ...rest: infer Rest) => Promise<unknown>
+    ? Rest extends MutationRequestRest
+      ? P
+      : never
+    : TRequest extends () => Promise<unknown>
+      ? void
+      : never;
 
 type MutationListFieldOf<TData> = SyncListFieldOf<TData>;
 
@@ -79,6 +89,8 @@ export type RemapInput<TInput> =
   | ((input: TInput, remap: (id: string) => string) => TInput);
 
 type Common<TParams, TData, TInput, TResponse> = {
+  /** Query whose cache this mutation updates — required for draft forms. */
+  query: MutationQueryRef<TParams, TData>;
   /** Stable mutation name for `mutationKey` — must be unique per query. */
   name: string;
   /** Client-side checks — throw `fail.validation(...)`. Runs before the draft update. */
@@ -168,6 +180,23 @@ export type MutationConfig<TParams, TData, TInput, TResponse> =
   | RemoveFieldMutation<TParams, TData, TInput, TResponse>
   | ObjectMutation<TParams, TData, TInput, TResponse>;
 
+/** Mutation without a bound query — `request` + optional `sync` only. */
+export type ThinMutationConfig<TParams, TInput, TResponse> = {
+  query?: never;
+  name: string;
+  validate?: (input: TInput) => void;
+  remapInput?: RemapInput<TInput>;
+  sync?: Sync<TParams, unknown, TInput, TResponse>;
+  removeQuery?: never;
+  insert?: never;
+  prepend?: never;
+  update?: never;
+  removeField?: never;
+  draft?: never;
+  settle?: never;
+  match?: never;
+};
+
 /* ------------------------------------------------------------------ *
  * Normalized runtime plan
  * ------------------------------------------------------------------ */
@@ -209,7 +238,7 @@ type RuntimeMutationConfig = {
 
 export type MutationPlan<TParams, TData, TInput, TResponse> = {
   name: string;
-  query: { key: (params: TParams) => readonly unknown[] };
+  query?: { key: (params: TParams) => readonly unknown[] };
   request: (params: TParams, input?: TInput) => Promise<TResponse>;
   effect: Effect;
   validate?: (input: TInput) => void;
@@ -217,13 +246,24 @@ export type MutationPlan<TParams, TData, TInput, TResponse> = {
   sync?: Sync<TParams, TData, TInput, TResponse>;
 };
 
-/** Call with params to get TanStack `mutationOptions`: `useMutation(addComment(id))`. */
-export type MutationFactory<TParams, TInput, TResponse> = {
+type MutationFactoryWithParams<TParams, TInput, TResponse> = {
   (params: TParams): UseMutationOptions<TResponse, DefineQueryMutationError, TInput, unknown>;
-  /** Stable TanStack mutation key — `[...queryKey, name]`. */
+  /** Stable TanStack mutation key — `[...queryKey, name]` or `[name, params]`. */
   key: (params: TParams) => readonly unknown[];
   readonly __input?: TInput;
 };
+
+type MutationFactoryNoParams<TInput, TResponse> = {
+  (): UseMutationOptions<TResponse, DefineQueryMutationError, TInput, unknown>;
+  /** Stable TanStack mutation key — `[name]` when `request` has no params. */
+  key: () => readonly unknown[];
+  readonly __input?: TInput;
+};
+
+/** Call with params to get TanStack `mutationOptions`: `useMutation(addComment(id))`. */
+export type MutationFactory<TParams, TInput, TResponse> = [TParams] extends [void]
+  ? MutationFactoryNoParams<TInput, TResponse>
+  : MutationFactoryWithParams<TParams, TInput, TResponse>;
 
 type MutationConfigWithRequest<
   TParams,
@@ -231,21 +271,27 @@ type MutationConfigWithRequest<
   TInput,
   TResponse,
   TRest extends MutationRequestRest,
-> = MutationConfig<TParams, TData, TInput, TResponse> & {
+> = (MutationConfig<TParams, TData, TInput, TResponse> | ThinMutationConfig<TParams, TInput, TResponse>) & {
   request: (params: TParams, ...args: TRest) => Promise<TResponse>;
 };
 
 const mutationNamesByQuery = new WeakMap<object, Set<string>>();
+const globalMutationNames = new Set<string>();
 
-function registerMutationName(query: object, name: string): void {
+function registerMutationName(queryRef: object | undefined, name: string): void {
   if (!import.meta.env.DEV) return;
-  let names = mutationNamesByQuery.get(query);
-  if (!names) {
-    names = new Set();
-    mutationNamesByQuery.set(query, names);
+  if (queryRef) {
+    let names = mutationNamesByQuery.get(queryRef);
+    if (!names) {
+      names = new Set();
+      mutationNamesByQuery.set(queryRef, names);
+    }
+    if (names.has(name)) warnDuplicateMutationName(name, 'query');
+    names.add(name);
+    return;
   }
-  if (names.has(name)) warnDuplicateMutationName(name);
-  names.add(name);
+  if (globalMutationNames.has(name)) warnDuplicateMutationName(name, 'global');
+  globalMutationNames.add(name);
 }
 
 function toRuntimeConfig<
@@ -308,6 +354,18 @@ function normalizeEffect(config: RuntimeMutationConfig): Effect {
   };
 }
 
+function runtimeRequiresQuery(config: RuntimeMutationConfig): boolean {
+  return Boolean(
+    config.removeQuery
+    || config.insert !== undefined
+    || config.prepend !== undefined
+    || config.update !== undefined
+    || config.removeField !== undefined
+    || config.draft !== undefined
+    || config.settle !== undefined,
+  );
+}
+
 function assertSingleDraftForm(config: RuntimeMutationConfig): void {
   const hasListForm =
     config.removeQuery
@@ -344,8 +402,7 @@ function makeFactory<
   TResponse,
   TRest extends MutationRequestRest,
 >(
-  queryRef: object,
-  query: { key: (params: TParams) => readonly unknown[] },
+  queryRef: MutationQueryRef<TParams, TData> | undefined,
   config: MutationConfigWithRequest<TParams, TData, TInput, TResponse, TRest>,
 ): MutationFactory<TParams, TInput, TResponse> {
   assertMutationName(config.name);
@@ -353,23 +410,37 @@ function makeFactory<
 
   const runtime = toRuntimeConfig(config);
   assertSingleDraftForm(runtime);
+
+  if (!queryRef && runtimeRequiresQuery(runtime)) {
+    throw new Error('[define-query] defineMutation: `query` is required when using a draft form');
+  }
+
   const plan: MutationPlan<TParams, TData, TInput, TResponse> = {
     name: config.name,
-    query,
-    request: (params, input) =>
-      input === undefined
-        ? (config.request as (p: TParams) => Promise<TResponse>)(params)
-        : (config.request as (p: TParams, i: TInput) => Promise<TResponse>)(params, input),
+    query: queryRef
+      ? { key: (params: TParams) => getQueryKey(queryRef, params) }
+      : undefined,
+    request: (params, input) => {
+      if (input !== undefined) {
+        return (config.request as (p: TParams, i: TInput) => Promise<TResponse>)(params, input);
+      }
+      if (config.request.length === 0) {
+        return (config.request as () => Promise<TResponse>)();
+      }
+      return (config.request as (p: TParams) => Promise<TResponse>)(params);
+    },
     effect: normalizeEffect(runtime),
     validate: config.validate,
     remapInput: config.remapInput ?? (['id'] as RemapInput<TInput>),
-    sync: config.sync,
+    sync: config.sync as Sync<TParams, TData, TInput, TResponse> | undefined,
   };
 
   const mutationKeyFn = (params: TParams): readonly unknown[] =>
-    buildMutationKey(query, plan.name, params);
+    queryRef
+      ? buildMutationKey(queryRef, plan.name, params)
+      : buildNameMutationKey(plan.name, params);
 
-  const factory = (params: TParams): UseMutationOptions<
+  const buildOptions = (params: TParams): UseMutationOptions<
     TResponse,
     DefineQueryMutationError,
     TInput,
@@ -386,7 +457,10 @@ function makeFactory<
     },
   });
 
-  return Object.assign(factory, { key: mutationKeyFn });
+  const factory = (params?: TParams) => buildOptions(params as TParams);
+  const key = (params?: TParams) => mutationKeyFn(params as TParams);
+
+  return Object.assign(factory, { key }) as MutationFactory<TParams, TInput, TResponse>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -398,21 +472,45 @@ export function defineMutation<
   TRest extends MutationRequestRest,
   TResponse,
 >(
-  query: TQuery,
   config: MutationConfig<
     QueryParams<TQuery>,
     QueryData<TQuery>,
     InferMutationInputFromRest<TRest>,
     TResponse
   > & {
+    query: TQuery;
     request: (params: QueryParams<TQuery>, ...args: TRest) => Promise<TResponse>;
   },
 ): MutationFactory<
   QueryParams<TQuery>,
   InferMutationInputFromRest<TRest>,
   TResponse
-> {
-  type TParams = QueryParams<TQuery>;
-  const key = query.key as (params: TParams) => readonly unknown[];
-  return makeFactory(query, { key: (params: TParams) => key(params) }, config);
+>;
+
+export function defineMutation<TResponse>(
+  config: ThinMutationConfig<void, void, TResponse> & {
+    request: () => Promise<TResponse>;
+  },
+): MutationFactory<void, void, TResponse>;
+
+export function defineMutation<
+  TParams,
+  TRest extends MutationRequestRest,
+  TResponse,
+>(
+  config: ThinMutationConfig<TParams, InferMutationInputFromRest<TRest>, TResponse> & {
+    request: (params: TParams, ...args: TRest) => Promise<TResponse>;
+  },
+): MutationFactory<TParams, InferMutationInputFromRest<TRest>, TResponse>;
+
+// Implementation signature — overloads above provide the public types.
+export function defineMutation(config: {
+  query?: MutationQueryRef;
+  name: string;
+  request: ((...args: never[]) => Promise<unknown>) | (() => Promise<unknown>);
+  [key: string]: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+}): any {
+  const query = config.query as MutationQueryRef | undefined;
+  return makeFactory(query, config as never);
 }

@@ -16,10 +16,12 @@ export type {
 export { defineMutation } from './define-mutation';
 export type {
   MutationConfig,
+  ThinMutationConfig,
   MutationFactory,
   DraftCtx,
   SettleCtx,
   ListItem,
+  ParamsFromRequest,
   InferMutationInputFromRest,
   InferMutationInput,
   InferMutationResponse,

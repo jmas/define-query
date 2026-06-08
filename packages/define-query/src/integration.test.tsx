@@ -14,7 +14,7 @@ const commentsQuery = defineQuery({
   options: { staleTime: Infinity },
 });
 
-const addComment = defineMutation(commentsQuery, {
+const addComment = defineMutation({ query: commentsQuery,
   name: 'add',
   request: async (_postId: string, text: string) => {
     if (text === 'boom') throw fail.network('offline');

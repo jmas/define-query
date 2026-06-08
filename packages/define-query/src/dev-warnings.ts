@@ -25,6 +25,10 @@ export function warnUserMetaConflict(): void {
   warnDev('options.meta["define-query"] is reserved — it will be overwritten by query sync');
 }
 
-export function warnDuplicateMutationName(name: string): void {
+export function warnDuplicateMutationName(name: string, scope?: 'query' | 'global'): void {
+  if (scope === 'global') {
+    warnDev(`duplicate mutation name "${name}" — name-only keys must be unique`);
+    return;
+  }
   warnDev(`duplicate mutation name "${name}" on the same query`);
 }

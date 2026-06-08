@@ -27,7 +27,7 @@ const timelineInfiniteQuery = defineInfiniteQuery({
 let resolveCreate: ((value: Post) => void) | undefined;
 let createPromise: Promise<Post> | undefined;
 
-const createPost = defineMutation(timelineInfiniteQuery, {
+const createPost = defineMutation({ query: timelineInfiniteQuery,
   name: 'create',
   request: async (_params: { q: string }, { title }: { title: string }) => {
     if (title === 'boom') throw fail.network('offline');
