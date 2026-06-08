@@ -1,5 +1,6 @@
 import { useMutation, useSuspenseQuery } from '@tanstack/react-query';
-import { memo, useRef, useState } from 'react';
+import type { DefineQueryMutationError } from 'define-query';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { mockCommentChaos } from '../../api';
 import type { Comment } from '../../api/types';
 import { FeatureTag } from '../../components/FeatureTag';
@@ -25,6 +26,10 @@ import {
   subpanelCls,
 } from '../../styles';
 
+function mutationUserMessage(error: DefineQueryMutationError): string {
+  return error.banner() ?? error.field('_') ?? error.field('text') ?? error.message;
+}
+
 const CommentsHeader = memo(function CommentsHeader() {
   return (
     <header className={panelHeaderCls}>
@@ -39,38 +44,54 @@ const CommentsHeader = memo(function CommentsHeader() {
 const CommentRow = memo(function CommentRow({
   postId,
   comment,
+  removeFailed,
+  removeError,
+  isRemovePending,
+  onRemove,
 }: {
   postId: string;
   comment: Comment;
+  removeFailed: boolean;
+  removeError: DefineQueryMutationError | null;
+  isRemovePending: boolean;
+  onRemove: (commentId: string) => void;
 }) {
-  const edit = useMutation(
-    editCommentMutation(postId),
-  );
-  const remove = useMutation(removeCommentMutation(postId));
+  const [text, setText] = useState(comment.text);
+  const edit = useMutation(editCommentMutation(postId));
+
+  useEffect(() => {
+    setText(comment.text);
+  }, [comment.id]);
+
+  const rowCls = removeFailed
+    ? `${commentRowCls} rounded-lg border border-red-300/80 bg-red-500/5 px-2 dark:border-red-900/80 dark:bg-red-500/10`
+    : edit.isPending || isRemovePending
+      ? `${commentRowCls} opacity-75`
+      : commentRowCls;
 
   return (
-    <li className={edit.isPending || remove.isPending ? `${commentRowCls} opacity-75` : commentRowCls}>
+    <li className={rowCls}>
       <input
-        key={comment.text}
         className={inputInlineCls}
-        defaultValue={comment.text}
+        value={text}
         disabled={edit.isPending}
-        onBlur={event => {
-          const nextText = event.target.value.trim();
+        onChange={event => setText(event.target.value)}
+        onBlur={() => {
+          const nextText = text.trim();
           if (!nextText || nextText === comment.text) return;
           edit.mutate({ commentId: comment.id, text: nextText });
         }}
       />
       {edit.isPending && <em className={mutedCls}>Saving…</em>}
-      {edit.error?.banner() && <em className={errorCls}>{edit.error.banner()}</em>}
-      {remove.error?.banner() && <em className={errorCls}>{remove.error.banner()}</em>}
+      {edit.error && <em className={errorCls}>{mutationUserMessage(edit.error)}</em>}
+      {removeError && <em className={errorCls}>{mutationUserMessage(removeError)}</em>}
       <button
         type="button"
         className={linkBtnCls}
-        disabled={remove.isPending}
-        onClick={() => remove.mutate(comment.id)}
+        disabled={isRemovePending}
+        onClick={() => onRemove(comment.id)}
       >
-        {remove.isPending ? 'Removing…' : 'Remove'}
+        {removeFailed ? 'Retry remove' : 'Remove'}
       </button>
     </li>
   );
@@ -85,7 +106,7 @@ const ChaosControls = memo(function ChaosControls() {
       <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
-          defaultChecked={mockCommentChaos.enabled}
+          checked={chaosEnabled}
           onChange={event => {
             const enabled = event.target.checked;
             setChaosEnabled(enabled);
@@ -102,7 +123,7 @@ const ChaosControls = memo(function ChaosControls() {
             min={10}
             max={90}
             step={5}
-            defaultValue={mockCommentChaos.rate}
+            value={chaosRate}
             onChange={event => {
               const rate = Number(event.target.value);
               setChaosRate(rate);
@@ -116,8 +137,8 @@ const ChaosControls = memo(function ChaosControls() {
       )}
       {chaosEnabled && (
         <p className={`${mutedCls} m-0 text-xs`}>
-          Rotates realistic network, validation, and server responses. Failed adds roll back — errors show on the
-          form.
+          Rotates realistic network, validation, and server responses. Failed adds and removes roll back — errors
+          show on the row or add form.
         </p>
       )}
     </div>
@@ -125,13 +146,14 @@ const ChaosControls = memo(function ChaosControls() {
 });
 
 const AddCommentForm = memo(function AddCommentForm({ postId }: { postId: string }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const add = useMutation(addCommentMutation(postId));
+  const [text, setText] = useState('');
+  const add = useMutation({
+    ...addCommentMutation(postId),
+    onSuccess: () => setText(''),
+  });
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    const text = inputRef.current?.value ?? '';
-    if (inputRef.current) inputRef.current.value = '';
     add.reset();
     add.mutate(text);
   }
@@ -139,9 +161,9 @@ const AddCommentForm = memo(function AddCommentForm({ postId }: { postId: string
   return (
     <form className={formCls} onSubmit={submit}>
       <input
-        ref={inputRef}
         className={formInputCls}
-        defaultValue=""
+        value={text}
+        onChange={event => setText(event.target.value)}
         placeholder="Add comment (empty → 422, prefix fail → retry, or enable chaos)…"
         disabled={add.isPending}
       />
@@ -156,14 +178,39 @@ const AddCommentForm = memo(function AddCommentForm({ postId }: { postId: string
 
 export const CommentsPanel = memo(function CommentsPanel({ postId }: { postId: string }) {
   const { data } = useSuspenseQuery(postCommentsQuery(postId));
+  const remove = useMutation(removeCommentMutation(postId));
+
+  const removingId =
+    remove.isPending && typeof remove.variables === 'string' ? remove.variables : null;
+  const failedRemoveId =
+    remove.isError && typeof remove.variables === 'string' ? remove.variables : null;
+
+  const handleRemove = useCallback(
+    (commentId: string) => {
+      remove.reset();
+      remove.mutate(commentId);
+    },
+    [remove],
+  );
 
   return (
     <section className={subpanelCls}>
       <CommentsHeader />
       <ChaosControls />
+      {removingId && (
+        <p className={`${mutedCls} mb-2`}>Removing comment…</p>
+      )}
       <ul className={commentsListCls}>
         {data.items.map(item => (
-          <CommentRow key={item.id} postId={postId} comment={item} />
+          <CommentRow
+            key={item.id}
+            postId={postId}
+            comment={item}
+            removeFailed={failedRemoveId === item.id}
+            removeError={failedRemoveId === item.id ? remove.error : null}
+            isRemovePending={remove.isPending}
+            onRemove={handleRemove}
+          />
         ))}
       </ul>
       <AddCommentForm postId={postId} />

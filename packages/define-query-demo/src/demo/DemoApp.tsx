@@ -15,7 +15,7 @@ const LatencyControl = memo(function LatencyControl() {
         min={0}
         max={1500}
         step={50}
-        defaultValue={mockLatencyMs.value}
+        value={latency}
         onChange={event => {
           const value = Number(event.target.value);
           setLatency(value);

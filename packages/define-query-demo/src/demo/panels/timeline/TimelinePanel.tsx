@@ -5,13 +5,13 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { flattenInfiniteField, isTempId } from 'define-query';
 import type { Post } from '../../api/types';
 import { FeatureTag } from '../../components/FeatureTag';
 import { RefetchIndicator } from '../../components/RefetchIndicator';
 import { TimelineListSkeleton } from '../../components/Skeleton';
-import { useDebouncedUncontrolledInput } from '../../hooks/use-debounced-uncontrolled-input';
+import { useDebouncedEffect } from '../../hooks/use-debounced-effect';
 import {
   createTimelinePostMutation,
   postQuery,
@@ -84,16 +84,17 @@ const TimelineSearch = memo(function TimelineSearch({
   className: string;
   onDebouncedChange: (value: string) => void;
 }) {
-  const { inputRef, scheduleNotify } = useDebouncedUncontrolledInput(200);
+  const [search, setSearch] = useState('');
+
+  useDebouncedEffect(search, 200, onDebouncedChange);
 
   return (
     <input
-      ref={inputRef}
       className={className}
       type="search"
       placeholder="Search posts (min 2 chars)…"
-      defaultValue=""
-      onChange={() => scheduleNotify(onDebouncedChange)}
+      value={search}
+      onChange={event => setSearch(event.target.value)}
     />
   );
 });
@@ -108,13 +109,13 @@ const TimelineCreateForm = memo(function TimelineCreateForm({
   disabled: boolean;
   onCreated: (id: string) => void;
 }) {
-  const titleRef = useRef<HTMLInputElement>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
   const create = useMutation({
     ...createTimelinePostMutation(CREATE_PARAMS),
     onSuccess: post => {
-      if (titleRef.current) titleRef.current.value = '';
-      if (bodyRef.current) bodyRef.current.value = '';
+      setTitle('');
+      setBody('');
       onCreated(post.id);
     },
   });
@@ -127,25 +128,22 @@ const TimelineCreateForm = memo(function TimelineCreateForm({
     event.preventDefault();
     if (disabled) return;
     create.reset();
-    create.mutate({
-      title: titleRef.current?.value ?? '',
-      body: bodyRef.current?.value ?? '',
-    });
+    create.mutate({ title, body });
   }
 
   return (
     <form className={formStackCls} onSubmit={submitCreate}>
       <input
-        ref={titleRef}
         className={inputCls}
-        defaultValue=""
+        value={title}
+        onChange={event => setTitle(event.target.value)}
         placeholder="Post title…"
         disabled={disabled || create.isPending}
       />
       <textarea
-        ref={bodyRef}
         className={`${inputCls} min-h-14 resize-y font-[inherit]`}
-        defaultValue=""
+        value={body}
+        onChange={event => setBody(event.target.value)}
         placeholder="Post body…"
         rows={2}
         disabled={disabled || create.isPending}

@@ -1,5 +1,5 @@
 import { useMutation, useSuspenseQuery } from '@tanstack/react-query';
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { FeatureTag } from '../../components/FeatureTag';
 import {
   postQuery,
@@ -40,19 +40,24 @@ const PostRenameField = memo(function PostRenameField({
   postId: string;
   savedTitle: string;
 }) {
+  const [title, setTitle] = useState(savedTitle);
   const rename = useMutation(renamePostMutation(postId));
+
+  useEffect(() => {
+    setTitle(savedTitle);
+  }, [postId]);
 
   return (
     <label className={fieldCls}>
       <span>Rename (blur to save)</span>
       <input
-        key={savedTitle}
         className={inputCls}
-        defaultValue={savedTitle}
+        value={title}
         disabled={rename.isPending}
-        onBlur={event => {
-          const title = event.target.value.trim();
-          if (title && title !== savedTitle) rename.mutate(title);
+        onChange={event => setTitle(event.target.value)}
+        onBlur={() => {
+          const nextTitle = title.trim();
+          if (nextTitle && nextTitle !== savedTitle) rename.mutate(nextTitle);
         }}
       />
     </label>
